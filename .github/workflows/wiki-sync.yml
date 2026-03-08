@@ -1,0 +1,67 @@
+name: Sync Docs to Wiki
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+
+  # Allow manual trigger
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync-wiki:
+    name: Sync docs/ → Wiki
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Sync to wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Configure git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Clone the wiki repo
+          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.wiki.git"
+          
+          # Try to clone — if wiki doesn't exist yet, initialize it
+          if git clone "$WIKI_URL" wiki-repo 2>/dev/null; then
+            echo "Wiki repo cloned successfully"
+          else
+            echo "Wiki repo doesn't exist yet — initializing"
+            mkdir wiki-repo
+            cd wiki-repo
+            git init
+            git remote add origin "$WIKI_URL"
+            cd ..
+          fi
+
+          # Clear wiki and copy docs
+          cd wiki-repo
+          # Remove all existing files (except .git)
+          find . -maxdepth 1 -not -name '.git' -not -name '.' -exec rm -rf {} +
+
+          # Copy all docs
+          cp -r ../docs/* .
+
+          # Check for changes
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No changes to sync"
+            exit 0
+          fi
+
+          # Get the commit that triggered this
+          SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
+          COMMIT_MSG=$(git -C .. log -1 --pretty=format:"%s")
+          
+          git commit -m "Sync docs from ${SHORT_SHA}: ${COMMIT_MSG}"
+          git push origin HEAD:master || git push origin HEAD:main
+          echo "Wiki synced successfully"
