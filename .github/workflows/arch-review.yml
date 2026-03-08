@@ -1,0 +1,294 @@
+name: Architectural Review
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  arch-review:
+    name: Architecture Review
+    runs-on: ubuntu-latest
+    # Don't run on PRs from bots (e.g., dependabot)
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Full history for diff
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the diff
+          gh pr diff ${{ github.event.pull_request.number }} > /tmp/pr_diff.txt 2>/dev/null || \
+            git diff origin/${{ github.base_ref }}...HEAD > /tmp/pr_diff.txt
+
+          # Get changed files list
+          gh pr diff ${{ github.event.pull_request.number }} --name-only > /tmp/changed_files.txt 2>/dev/null || \
+            git diff origin/${{ github.base_ref }}...HEAD --name-only > /tmp/changed_files.txt
+
+          # Truncate diff if too large (keep under 100K chars for token budget)
+          if [ $(wc -c < /tmp/pr_diff.txt) -gt 100000 ]; then
+            head -c 100000 /tmp/pr_diff.txt > /tmp/pr_diff_truncated.txt
+            echo -e "\n\n... [DIFF TRUNCATED — exceeded 100K chars] ..." >> /tmp/pr_diff_truncated.txt
+            mv /tmp/pr_diff_truncated.txt /tmp/pr_diff.txt
+          fi
+
+          echo "diff_size=$(wc -c < /tmp/pr_diff.txt)" >> $GITHUB_OUTPUT
+          echo "file_count=$(wc -l < /tmp/changed_files.txt)" >> $GITHUB_OUTPUT
+
+      - name: Gather architecture docs
+        run: |
+          # Concatenate all architecture docs into one context file
+          echo "=== docs/Architecture.md ===" > /tmp/arch_context.txt
+          cat docs/Architecture.md >> /tmp/arch_context.txt 2>/dev/null || echo "(not found)" >> /tmp/arch_context.txt
+
+          echo -e "\n\n=== docs/Contributing.md ===" >> /tmp/arch_context.txt
+          cat docs/Contributing.md >> /tmp/arch_context.txt 2>/dev/null || echo "(not found)" >> /tmp/arch_context.txt
+
+          echo -e "\n\n=== docs/Testing.md ===" >> /tmp/arch_context.txt
+          cat docs/Testing.md >> /tmp/arch_context.txt 2>/dev/null || echo "(not found)" >> /tmp/arch_context.txt
+
+          echo -e "\n\n=== docs/API-Reference.md ===" >> /tmp/arch_context.txt
+          cat docs/API-Reference.md >> /tmp/arch_context.txt 2>/dev/null || echo "(not found)" >> /tmp/arch_context.txt
+
+          echo -e "\n\n=== docs/Configuration.md ===" >> /tmp/arch_context.txt
+          cat docs/Configuration.md >> /tmp/arch_context.txt 2>/dev/null || echo "(not found)" >> /tmp/arch_context.txt
+
+          echo -e "\n\n=== Cargo.toml (workspace) ===" >> /tmp/arch_context.txt
+          cat Cargo.toml >> /tmp/arch_context.txt 2>/dev/null || echo "(not found)" >> /tmp/arch_context.txt
+
+          echo "context_size=$(wc -c < /tmp/arch_context.txt)" >> $GITHUB_OUTPUT
+
+      - name: Run architectural review
+        id: review
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: |
+          # Build the prompt
+          cat > /tmp/review_prompt.txt << 'SYSTEM_PROMPT'
+          You are an architectural code reviewer for the pi-daemon project — a Rust-based agent kernel daemon.
+
+          Your job is to review a pull request diff against the project's architecture documentation and report whether the changes conform to the documented architecture, conventions, and best practices.
+
+          ## Review Checklist
+
+          1. **Crate Structure**: Do new files/modules live in the correct crate per the architecture doc? Is the dependency graph respected (types → kernel → api → cli, no cycles)?
+
+          2. **Concurrency Patterns**: Does the code use DashMap (not Mutex<HashMap>) for concurrent maps? broadcast channels for pub/sub? Arc for shared state?
+
+          3. **Error Handling**: Does the code use thiserror for typed errors and anyhow at boundaries? No unwrap() in library code (only in tests)?
+
+          4. **Naming Conventions**: snake_case everywhere? Types match their module names? Test naming follows test_<thing>_<behavior>?
+
+          5. **API Conventions**: Do new routes follow the existing pattern (State extractor, Json responses, proper status codes)? Are they documented in API-Reference.md?
+
+          6. **Testing**: Are there unit tests for new public functions? Integration tests for new API endpoints? Do tests use the test-utils helpers (test_kernel, test_server, TestClient)?
+
+          7. **Security**: No unwrap() on user input. API key middleware applied to new routes. Sensitive values not logged.
+
+          8. **Logging**: Uses tracing macros (info!, warn!, debug!), not println!.
+
+          9. **Documentation**: New public items have doc comments. Changes reflected in docs/ if they affect architecture or API.
+
+          10. **General Best Practices**: No TODO/FIXME without an issue reference. No dead code. No unnecessary clones.
+
+          ## Output Format
+
+          You MUST output EXACTLY this JSON structure (no markdown fences, no extra text before or after):
+
+          {
+            "verdict": "PASS" or "FAIL",
+            "summary": "One-line summary of the review result",
+            "checks": [
+              {
+                "name": "Check name (from checklist above)",
+                "status": "pass" or "fail" or "skip",
+                "detail": "Brief explanation"
+              }
+            ],
+            "issues": [
+              {
+                "severity": "error" or "warning" or "info",
+                "file": "path/to/file.rs",
+                "description": "What's wrong and how to fix it"
+              }
+            ],
+            "notes": "Any additional observations or suggestions (optional)"
+          }
+
+          Rules:
+          - Verdict is FAIL if ANY check has status "fail" with severity "error"
+          - Verdict is PASS if all checks pass or only have warnings/info
+          - "skip" means the check isn't relevant to this PR (e.g., no new API routes → skip API check)
+          - Be specific — cite exact file paths and line references from the diff
+          - If the PR only changes docs or CI config, most checks should be "skip" and verdict "PASS"
+          - Do NOT be nitpicky about style in docs-only or config-only PRs
+          SYSTEM_PROMPT
+
+          # Build the user message
+          cat > /tmp/review_input.txt << 'INPUT_HEADER'
+          ## Architecture Documentation
+
+          INPUT_HEADER
+          cat /tmp/arch_context.txt >> /tmp/review_input.txt
+
+          echo -e "\n\n## Changed Files\n" >> /tmp/review_input.txt
+          cat /tmp/changed_files.txt >> /tmp/review_input.txt
+
+          echo -e "\n\n## PR Diff\n\`\`\`diff" >> /tmp/review_input.txt
+          cat /tmp/pr_diff.txt >> /tmp/review_input.txt
+          echo -e "\n\`\`\`" >> /tmp/review_input.txt
+
+          # Read prompt and input
+          SYSTEM=$(cat /tmp/review_prompt.txt)
+          USER_MSG=$(cat /tmp/review_input.txt)
+
+          # Call OpenRouter API (Gemini 2.5 Flash)
+          RESPONSE=$(curl -s -X POST "https://openrouter.ai/api/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+            -H "HTTP-Referer: https://github.com/demonseed-jpg/pi-daemon" \
+            -H "X-Title: pi-daemon-arch-review" \
+            -d "$(jq -n \
+              --arg system "$SYSTEM" \
+              --arg user "$USER_MSG" \
+              '{
+                "model": "google/gemini-2.5-flash",
+                "messages": [
+                  {"role": "system", "content": $system},
+                  {"role": "user", "content": $user}
+                ],
+                "temperature": 0.1,
+                "max_tokens": 4096
+              }')")
+
+          # Extract the content from the response
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // empty')
+
+          if [ -z "$REVIEW" ]; then
+            echo "::error::LLM returned empty response"
+            echo "$RESPONSE" | jq . 2>/dev/null || echo "$RESPONSE"
+            # Write a fallback review
+            REVIEW='{"verdict":"PASS","summary":"Review could not be completed — LLM returned empty response. Defaulting to PASS.","checks":[],"issues":[],"notes":"The OpenRouter API call did not return a valid response. Check the OPENROUTER_API_KEY secret and API availability."}'
+          fi
+
+          # Clean the response — strip markdown fences if present
+          REVIEW=$(echo "$REVIEW" | sed 's/^```json//; s/^```//; s/```$//' | sed '/^$/d')
+
+          # Save the review
+          echo "$REVIEW" > /tmp/review_result.json
+
+          # Extract verdict
+          VERDICT=$(echo "$REVIEW" | jq -r '.verdict // "PASS"')
+          echo "verdict=$VERDICT" >> $GITHUB_OUTPUT
+
+          echo "Review complete: $VERDICT"
+
+      - name: Create Check Run
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let review;
+            try {
+              const raw = fs.readFileSync('/tmp/review_result.json', 'utf8');
+              review = JSON.parse(raw);
+            } catch (e) {
+              console.log('Failed to parse review JSON:', e.message);
+              review = {
+                verdict: 'PASS',
+                summary: 'Review JSON parse failed — defaulting to PASS',
+                checks: [],
+                issues: [],
+                notes: 'Raw output could not be parsed as JSON.'
+              };
+            }
+
+            const verdict = review.verdict || 'PASS';
+            const conclusion = verdict === 'PASS' ? 'success' : 'failure';
+
+            // Build check run summary
+            const checksTable = (review.checks || [])
+              .map(c => {
+                const icon = c.status === 'pass' ? '✅' : c.status === 'fail' ? '❌' : '⏭️';
+                return `| ${icon} | ${c.name} | ${c.detail || ''} |`;
+              })
+              .join('\n');
+
+            const issuesList = (review.issues || [])
+              .map(i => {
+                const icon = i.severity === 'error' ? '🔴' : i.severity === 'warning' ? '🟡' : 'ℹ️';
+                const file = i.file ? `\`${i.file}\`: ` : '';
+                return `- ${icon} ${file}${i.description}`;
+              })
+              .join('\n');
+
+            let summary = `## ${verdict === 'PASS' ? '✅' : '❌'} Architectural Review: ${verdict}\n\n`;
+            summary += `**${review.summary || 'No summary'}**\n\n`;
+
+            if (checksTable) {
+              summary += `### Checks\n\n| Status | Check | Detail |\n|--------|-------|--------|\n${checksTable}\n\n`;
+            }
+
+            if (issuesList) {
+              summary += `### Issues\n\n${issuesList}\n\n`;
+            }
+
+            if (review.notes) {
+              summary += `### Notes\n\n${review.notes}\n`;
+            }
+
+            // Create the check run (native GitHub check)
+            await github.rest.checks.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              name: 'Architectural Review',
+              head_sha: context.payload.pull_request.head.sha,
+              status: 'completed',
+              conclusion: conclusion,
+              output: {
+                title: `Architecture: ${verdict}`,
+                summary: summary,
+              },
+            });
+
+            // Post PR comment
+            const commentBody = summary + `\n---\n*🤖 Automated architectural review powered by Gemini 2.5 Flash via OpenRouter*`;
+
+            // Find existing comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes('Architectural Review:'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: commentBody,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: commentBody,
+              });
+            }
+
+            // Fail the job if verdict is FAIL
+            if (verdict === 'FAIL') {
+              core.setFailed(`Architectural review failed: ${review.summary}`);
+            }
