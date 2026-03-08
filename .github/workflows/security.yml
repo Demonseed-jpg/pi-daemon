@@ -1,0 +1,155 @@
+name: Security
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  # ─── TruffleHog Secrets Scan ────────────────────────────
+  secrets-scan:
+    name: Secrets Scan
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Install trufflehog
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | sh -s -- -b /usr/local/bin
+
+      - name: Scan for secrets
+        id: scan
+        run: |
+          trufflehog filesystem . \
+            --no-update \
+            --fail \
+            --only-verified \
+            --exclude-paths=<(echo -e "target/\n.git/\nCargo.lock") \
+            2>&1 | tee /tmp/trufflehog_output.txt
+        continue-on-error: true
+
+      - name: Report secrets
+        if: steps.scan.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const output = fs.readFileSync('/tmp/trufflehog_output.txt', 'utf8');
+
+            const body = `## 🔴 Secrets Detected
+
+            TruffleHog found verified secrets in this PR. **These must be removed before merge.**
+
+            \`\`\`
+            ${output.slice(0, 3000)}
+            \`\`\`
+
+            ### How to fix
+            1. Remove the secret from the code
+            2. Rotate the compromised credential immediately
+            3. Use environment variables or \`~/.pi-daemon/config.toml\` for secrets
+
+            ---
+            *🔒 Automated secrets scan via TruffleHog*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes('Secrets Detected'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body,
+              });
+            }
+
+            core.setFailed('Verified secrets detected in PR');
+
+  # ─── Hardcoded Credential Patterns ──────────────────────
+  credential-patterns:
+    name: Credential Patterns
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan diff for credential patterns
+        id: scan
+        run: |
+          PATTERNS='(sk-ant-[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}|glpat-[a-zA-Z0-9\-]{20,}|xoxb-[0-9]{10,}|xoxp-[0-9]{10,}|AKIA[0-9A-Z]{16})'
+
+          # Only scan the diff, not the entire repo
+          DIFF=$(git diff origin/main...HEAD -- ':!*.lock' ':!.github/workflows/security.yml' 2>/dev/null || git diff HEAD~1 -- ':!*.lock' ':!.github/workflows/security.yml' 2>/dev/null || echo "")
+
+          FOUND=$(echo "$DIFF" | grep -Pn "^\+" | grep -P "$PATTERNS" || true)
+
+          if [ -n "$FOUND" ]; then
+            echo "found=true" >> $GITHUB_OUTPUT
+            echo "$FOUND" > /tmp/credential_matches.txt
+            echo "::error::Potential API keys/tokens found in diff"
+            exit 1
+          else
+            echo "found=false" >> $GITHUB_OUTPUT
+            echo "No credential patterns found in diff"
+          fi
+        continue-on-error: true
+
+      - name: Report credentials
+        if: steps.scan.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let matches = '';
+            try { matches = fs.readFileSync('/tmp/credential_matches.txt', 'utf8'); } catch {}
+
+            const body = `## 🟡 Potential Credentials Detected
+
+            Hardcoded credential patterns found in this PR's diff:
+
+            \`\`\`
+            ${matches.slice(0, 2000)}
+            \`\`\`
+
+            If these are intentional (e.g., regex patterns in a scanner), this warning can be ignored.
+            Otherwise, move secrets to environment variables or config files.
+
+            ---
+            *🔒 Automated credential pattern scan*`;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner, repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body && c.body.includes('Potential Credentials Detected'));
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                comment_id: existing.id, body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: context.issue.number, body,
+              });
+            }
+
+            core.setFailed('Potential credential patterns found');
