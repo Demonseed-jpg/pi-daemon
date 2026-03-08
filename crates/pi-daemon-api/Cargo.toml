@@ -1,0 +1,21 @@
+[package]
+name = "pi-daemon-api"
+version.workspace = true
+edition.workspace = true
+description = "HTTP/WebSocket API server for pi-daemon"
+
+[dependencies]
+pi-daemon-types = { path = "../pi-daemon-types" }
+pi-daemon-kernel = { path = "../pi-daemon-kernel" }
+tokio = { workspace = true }
+axum = { workspace = true }
+tower = { workspace = true }
+tower-http = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+dashmap = { workspace = true }
+futures = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }
+bytes = { workspace = true }
