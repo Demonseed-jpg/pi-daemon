@@ -19,49 +19,58 @@ jobs:
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - name: Sync to wiki
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # GITHUB_TOKEN can't push to wiki repos.
+          # Use a PAT stored as a repo secret named WIKI_TOKEN.
+          # If WIKI_TOKEN is not set, fall back to GITHUB_TOKEN (will fail on push
+          # but won't break the workflow — just logs a warning).
+          WIKI_TOKEN: ${{ secrets.WIKI_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
+          set -e
+
           # Configure git
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
           # Clone the wiki repo
-          WIKI_URL="https://x-access-token:${GH_TOKEN}@github.com/${{ github.repository }}.wiki.git"
-          
-          # Try to clone — if wiki doesn't exist yet, initialize it
-          if git clone "$WIKI_URL" wiki-repo 2>/dev/null; then
-            echo "Wiki repo cloned successfully"
-          else
-            echo "Wiki repo doesn't exist yet — initializing"
-            mkdir wiki-repo
-            cd wiki-repo
-            git init
-            git remote add origin "$WIKI_URL"
-            cd ..
+          WIKI_URL="https://x-access-token:${WIKI_TOKEN}@github.com/${{ github.repository }}.wiki.git"
+
+          echo "Cloning wiki repo..."
+          if ! git clone --depth 1 "$WIKI_URL" wiki-repo 2>/dev/null; then
+            echo "::warning::Wiki repo not found. Create the first wiki page manually at:"
+            echo "::warning::https://github.com/${{ github.repository }}/wiki"
+            echo "::warning::Then re-run this workflow."
+            exit 0
           fi
 
-          # Clear wiki and copy docs
+          # Clear wiki content (preserve .git)
           cd wiki-repo
-          # Remove all existing files (except .git)
           find . -maxdepth 1 -not -name '.git' -not -name '.' -exec rm -rf {} +
 
-          # Copy all docs
+          # Copy docs
           cp -r ../docs/* .
 
           # Check for changes
           git add -A
           if git diff --cached --quiet; then
-            echo "No changes to sync"
+            echo "No changes to sync — wiki is up to date."
             exit 0
           fi
 
-          # Get the commit that triggered this
+          # Commit with reference to the triggering commit
           SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
           COMMIT_MSG=$(git -C .. log -1 --pretty=format:"%s")
-          
-          git commit -m "Sync docs from ${SHORT_SHA}: ${COMMIT_MSG}"
-          git push origin HEAD:master || git push origin HEAD:main
-          echo "Wiki synced successfully"
+          git commit -m "docs: sync from ${SHORT_SHA} — ${COMMIT_MSG}"
+
+          # Push
+          if git push origin HEAD:master 2>/dev/null || git push origin HEAD:main 2>/dev/null; then
+            echo "✅ Wiki synced successfully"
+          else
+            echo "::error::Failed to push to wiki. Add a PAT with repo scope as a secret named WIKI_TOKEN."
+            echo "::error::Go to: Settings → Secrets → Actions → New repository secret"
+            exit 1
+          fi
