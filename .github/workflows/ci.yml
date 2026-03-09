@@ -349,9 +349,9 @@ jobs:
               security: '${{ needs.security.result }}',
               build: '${{ needs.build-release.result }}',
               msrv: '${{ needs.msrv.result }}',
-              license-check: ${{ needs.license-check.result }},
-              unused-deps: ${{ needs.unused-deps.result }},
-              crate-doc-sync: ${{ needs.crate-doc-sync.result }},
+              'license-check': '${{ needs.license-check.result }}',
+              'unused-deps': '${{ needs.unused-deps.result }}',
+              'crate-doc-sync': '${{ needs.crate-doc-sync.result }}',
             };
             
             const icon = (s) => s === 'success' ? '✅' : s === 'skipped' ? '⏭️' : '❌';
