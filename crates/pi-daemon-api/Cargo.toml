@@ -3,6 +3,7 @@ name = "pi-daemon-api"
 version.workspace = true
 edition.workspace = true
 description = "HTTP/WebSocket API server for pi-daemon"
+publish = false
 
 [dependencies]
 pi-daemon-types = { path = "../pi-daemon-types" }
