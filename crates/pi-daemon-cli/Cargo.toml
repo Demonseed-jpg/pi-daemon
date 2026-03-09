@@ -3,6 +3,7 @@ name = "pi-daemon-cli"
 version.workspace = true
 edition.workspace = true
 description = "CLI for pi-daemon"
+publish = false
 
 [[bin]]
 name = "pi-daemon"

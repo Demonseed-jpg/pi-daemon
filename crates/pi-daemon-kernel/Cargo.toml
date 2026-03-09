@@ -3,6 +3,7 @@ name = "pi-daemon-kernel"
 version.workspace = true
 edition.workspace = true
 description = "Agent kernel — registry, event bus, config"
+publish = false
 
 [dependencies]
 pi-daemon-types = { path = "../pi-daemon-types" }
