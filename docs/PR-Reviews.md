@@ -130,9 +130,69 @@ When both structural and semantic checks run, a single PR comment is posted:
 | **Unit Tests** | cargo test (per-crate matrix) | ✅ | ❌ | Parallel per-crate. Standard test output in logs. |
 | **Integration Tests** | cargo test --test '*' | ✅ | ❌ | Cross-module tests. Runs after lint passes. |
 | **E2E Tests** | tests/e2e/ | ✅ | ❌ | Full daemon boot, HTTP/WebSocket flows. |
+| **Sandbox Integration** | Real binary lifecycle testing | ✅ | ❌ | Builds release binary, runs as actual daemon process, tests concurrency, memory, crash recovery, graceful shutdown. Only runs when core code changes. |
 | **Coverage** | cargo-llvm-cov | ❌ | ✅ | Posts per-crate coverage breakdown as PR comment. Advisory only. |
 | **Release Build** | cargo build --release | ✅ | ❌ | Must compile for Linux x86_64 and macOS ARM64. |
 | **MSRV** | cargo check on Rust 1.75 | ✅ | ❌ | Minimum Supported Rust Version. |
+
+---
+
+## Sandbox Integration Testing
+
+The **Sandbox Integration Test** (`sandbox-test.yml`) is a unique workflow that tests the actual `pi-daemon` binary in a real CI environment, catching deployment issues that in-process tests cannot detect.
+
+### What Makes It Different
+- **Real Binary**: Builds `cargo build --release` and executes actual `pi-daemon` command
+- **Real Process**: Daemon runs as separate process with PID tracking and signal handling
+- **Real Ports**: Tests port 4200 binding (not random test ports)  
+- **Real Configuration**: Loads actual TOML config files from disk
+- **Real Concurrency**: Multiple HTTP clients + WebSocket connections + sustained load
+
+### Test Phases
+
+#### Phase 1: Smoke Testing
+- Binary startup and health endpoint readiness
+- All API endpoints functional (health, status, agents, events, shutdown, OpenAI)
+- Webchat SPA loads with full content
+- PID file management (creation, tracking, cleanup)
+
+#### Phase 2: Concurrency & Load
+- 50 concurrent HTTP requests to `/api/status`
+- 20 concurrent agent registrations with verification  
+- 5 WebSocket connections within per-IP limits
+- Memory usage monitoring (warns if >200MB)
+
+#### Phase 3: Stress & Recovery  
+- 30-second sustained load with memory growth tracking
+- Kill -9 crash simulation followed by restart verification
+- Memory leak detection (warns if >50MB growth during load)
+
+#### Phase 4: Graceful Shutdown
+- API shutdown endpoint testing
+- Process exit verification and timing
+- PID file cleanup validation
+- Port release confirmation
+
+### Critical Gaps Addressed
+
+| In-Process Tests Miss | Real Deployment Bug | Sandbox Catches |
+|-----------------------|-------------------|-----------------|
+| Binary panics on startup | Missing runtime init | ✅ Real daemon startup |
+| PID file management | Written but never cleaned up | ✅ File lifecycle testing |
+| Port binding issues | SO_REUSEADDR conflicts | ✅ Standard port binding |
+| Signal handling | Ctrl+C/SIGTERM cleanup | ✅ Signal testing |
+| Memory leaks | Only visible under sustained use | ✅ Load testing + monitoring |
+| WebSocket limits | Per-IP enforcement | ✅ Connection limit validation |
+
+### When It Runs
+- **Trigger**: Pull requests that change `crates/**`, `Cargo.toml`, or `Cargo.lock`
+- **Skip**: Documentation-only changes (no unnecessary overhead)
+- **Timeout**: 10 minutes (prevents hung processes from blocking CI)
+
+### Future Enhancements
+- **#77**: Persistence testing (after SQLite substrate #13)
+- **#78**: Supervisor stress testing (after supervisor #17) 
+- **#79**: Scheduler validation (after cron engine #16)
 
 ---
 
