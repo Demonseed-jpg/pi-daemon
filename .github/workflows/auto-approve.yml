@@ -38,7 +38,7 @@ jobs:
             
             return pr.number;
 
-      - name: Check if all required checks passed
+      - name: Wait for CI completion and check status
         id: check-status
         if: steps.get-pr.outputs.pr-number
         uses: actions/github-script@v7
@@ -47,6 +47,9 @@ jobs:
             const prNumber = ${{ steps.get-pr.outputs.pr-number }};
             const headSha = '${{ steps.get-pr.outputs.pr-head-sha }}';
             
+            // Wait a bit to ensure all checks have registered
+            await new Promise(resolve => setTimeout(resolve, 10000));
+            
             // Get all check runs for this commit
             const { data: checkRuns } = await github.rest.checks.listForRef({
               owner: context.repo.owner,
@@ -54,7 +57,7 @@ jobs:
               ref: headSha
             });
             
-            // Required check patterns (these must all pass)
+            // Required check patterns (these must ALL pass)
             const requiredChecks = [
               /^Lint$/,
               /^Unit Tests \(.+\)$/,
@@ -62,36 +65,54 @@ jobs:
               /^Code Coverage$/,
               /^Security Audit$/,
               /^Build \(.+\)$/,
-              /^Minimum Supported Rust Version$/
+              /^Minimum Supported Rust Version$/,
+              /^PR Report$/
             ];
             
             // Check if all required checks exist and passed
             let allPassed = true;
             const results = [];
+            let totalChecks = 0;
+            let passedChecks = 0;
             
             for (const pattern of requiredChecks) {
               const matching = checkRuns.check_runs.filter(run => pattern.test(run.name));
+              totalChecks += matching.length;
               
               if (matching.length === 0) {
-                console.log(`Missing required check: ${pattern}`);
+                console.log(`❌ Missing required check: ${pattern}`);
                 allPassed = false;
                 results.push(`❌ Missing: ${pattern}`);
               } else {
-                const allMatchingPassed = matching.every(run => run.conclusion === 'success');
+                const allMatchingPassed = matching.every(run => 
+                  run.conclusion === 'success' && run.status === 'completed'
+                );
                 if (!allMatchingPassed) {
-                  console.log(`Failed check: ${pattern}`);
+                  console.log(`❌ Failed or incomplete check: ${pattern}`);
                   allPassed = false;
                   results.push(`❌ Failed: ${pattern}`);
+                  // Log details of failed checks
+                  matching.forEach(run => {
+                    if (run.conclusion !== 'success' || run.status !== 'completed') {
+                      console.log(`  - ${run.name}: ${run.status}/${run.conclusion}`);
+                    }
+                  });
                 } else {
                   results.push(`✅ Passed: ${pattern}`);
+                  passedChecks += matching.length;
                 }
               }
             }
             
-            console.log('Check results:', results.join('\n'));
-            core.setOutput('all-passed', allPassed);
+            console.log(`Check Summary: ${passedChecks}/${totalChecks} required checks passed`);
+            console.log('Detailed results:', results.join('\n'));
             
-            return allPassed;
+            // Only approve if ALL checks passed AND we have the expected number
+            const hasMinimumChecks = totalChecks >= 7; // At least the core checks
+            core.setOutput('all-passed', allPassed && hasMinimumChecks);
+            core.setOutput('check-count', totalChecks);
+            
+            return allPassed && hasMinimumChecks;
 
       - name: Auto-approve PR
         if: >

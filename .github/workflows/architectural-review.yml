@@ -60,20 +60,25 @@ jobs:
             
             const prompt = `You are an expert Rust code reviewer for the pi-daemon project. Review this PR against the project's architecture and coding standards.
 
-**IMPORTANT: Be more stringent than before. Use these STRICT criteria:**
+**CRITICAL: Use VERY STRICT criteria. This is blocking CI - be harsh:**
 
-## Strict Pass/Fail Criteria
+## STRICT Pass/Fail Criteria (FAIL IMMEDIATELY on any of these)
 
-❌ **FAIL if:**
-- Any placeholder tests like \`assert_eq!(2 + 2, 4)\` or \`it_works()\` 
-- Any \`unwrap()\` in library code (except tests)
-- Missing error handling with proper \`Result<>\` types
-- Missing doc comments on public APIs
-- Tests that don't actually test the intended functionality
-- TODO comments without GitHub issue references
-- Hardcoded values that should be configurable
-- Missing \`thiserror\` for error types
-- Using \`println!\` instead of \`tracing\` in library code
+❌ **MANDATORY FAILURES:**
+- Any test named \`it_works\` or \`test_it_works\` 
+- Any test that only does arithmetic like \`assert_eq!(2 + 2, 4)\`
+- Any \`TODO\` without a GitHub issue reference like \`TODO(#123)\`
+- Any \`unwrap()\` or \`expect()\` in library code (tests are OK)
+- Missing doc comments on any public function, struct, or module
+- Any \`println!\` or \`eprintln!\` in library code
+- Functions longer than 50 lines without tests
+- Empty lib.rs files with just comments
+- Placeholder implementations that don't actually work
+
+❌ **ALSO FAIL if:**
+- Tests that don't test actual functionality
+- Missing error types for Result returns
+- Hardcoded strings that should be constants
 
 ⚠️ **WARN if:**
 - Test coverage below reasonable thresholds

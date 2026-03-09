@@ -130,7 +130,7 @@ jobs:
             const lines = summary.split('\n');
             const totalLine = lines.find(l => l.includes('TOTAL'));
             
-            const commitSha = context.sha.slice(0, 7);
+            const commitSha = (context.payload.pull_request?.head?.sha || context.sha).slice(0, 7);
             const body = "## 📊 Code Coverage (" + commitSha + ")\n\n" +
               "```\n" + lines.slice(-10).join('\n') + "\n```\n\n" +
               "<details>\n<summary>Full coverage report</summary>\n\n" +
@@ -275,7 +275,7 @@ jobs:
             const allPassed = Object.values(jobs).every(r => r === 'success' || r === 'skipped');
             const header = allPassed ? '## ✅ All CI checks passed' : '## ❌ CI checks failed';
             
-            const commitSha = context.sha.slice(0, 7);
+            const commitSha = (context.payload.pull_request?.head?.sha || context.sha).slice(0, 7);
             const body = header + " (" + commitSha + ")\n\n" +
               "| Status | Job | Result |\n" +
               "|--------|-----|---------|\n" +
