@@ -8,9 +8,10 @@ description = "Shared test utilities for pi-daemon"
 pi-daemon-kernel = { path = "../pi-daemon-kernel" }
 pi-daemon-api = { path = "../pi-daemon-api" }
 pi-daemon-types = { path = "../pi-daemon-types" }
-tokio = { workspace = true, features = ["macros"] }
+tokio = { workspace = true, features = ["macros", "time"] }
 axum = { workspace = true }
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+serde_json = { workspace = true }
 tempfile = "3"
 
 [dev-dependencies]
