@@ -22,10 +22,7 @@ mod tests {
                 .expect("Version parts should be numbers");
         }
     }
-}
 
-#[cfg(test)]
-mod tests {
     #[test]
     fn test_version_output() {
         // Simple test to verify basic functionality
