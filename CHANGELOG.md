@@ -1,0 +1,26 @@
+# Changelog
+
+All notable changes to pi-daemon will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+- Core types crate (`pi-daemon-types`) with agent, message, event, and error types (#4)
+- Comprehensive CI/CD pipeline with 25+ automated checks (#24)
+- Supply chain security checks with cargo-deny (#34)
+- Code quality checks: unsafe detection, TODO tracking, docs drift, binary size (#35)
+- Auto-approve workflow for seamless PR merging (#56/#57)
+
+### Infrastructure
+- Workspace-based Rust project structure with 5 crates
+- GitHub Actions workflows for security, testing, and quality assurance
+- Branch protection with required status checks and reviews
+
+## [0.1.0] - 2026-03-09
+
+### Added
+- Initial project structure and workspace setup (#3)
+- Basic crate scaffolding for types, kernel, API, CLI, and test utilities
