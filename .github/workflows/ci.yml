@@ -247,6 +247,170 @@ jobs:
             echo "✅ All crates documented in Architecture.md"
           fi
 
+  # ─── Code Quality Checks ───────────────────────────────
+  unsafe-check:
+    name: Unsafe Code
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for new unsafe code
+        run: |
+          NEW_UNSAFE=$(git diff origin/main...HEAD -- '*.rs' | grep -n '^\+.*unsafe ' | grep -v '^\+.*//.*unsafe' || true)
+          
+          if [ -n "$NEW_UNSAFE" ]; then
+            echo "::error::New unsafe code detected. pi-daemon must be 100% safe Rust."
+            echo "If this is intentional, add a comment explaining why:"
+            echo "$NEW_UNSAFE"
+            exit 1
+          else
+            echo "✅ No unsafe code detected"
+          fi
+
+  todo-tracker:
+    name: TODO Tracker
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for orphaned TODOs
+        run: |
+          # Find new TODOs in the diff that don't reference an issue
+          NEW_TODOS=$(git diff origin/main...HEAD -- '*.rs' '*.md' | grep -n '^\+.*\(TODO\|FIXME\|HACK\|XXX\)' | grep -v '#[0-9]' || true)
+          
+          if [ -n "$NEW_TODOS" ]; then
+            echo "::warning::New TODOs without issue references:"
+            echo "$NEW_TODOS"
+            echo ""
+            echo "Please add an issue reference: TODO(#42): description"
+          else
+            echo "✅ All TODOs have issue references"
+          fi
+
+  docs-drift:
+    name: Docs Drift
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check for docs drift
+        run: |
+          CHANGED=$(git diff origin/main...HEAD --name-only)
+          WARNINGS=""
+          
+          # routes changed → API-Reference.md should too
+          if echo "$CHANGED" | grep -q 'routes'; then
+            if ! echo "$CHANGED" | grep -q 'API-Reference.md'; then
+              WARNINGS="${WARNINGS}\n⚠️ Route files changed but docs/API-Reference.md was not updated"
+            fi
+          fi
+          
+          # Cargo.toml members changed → Architecture.md should too
+          if echo "$CHANGED" | grep -q 'Cargo.toml'; then
+            if git diff origin/main...HEAD -- Cargo.toml | grep -q 'members'; then
+              if ! echo "$CHANGED" | grep -q 'Architecture.md'; then
+                WARNINGS="${WARNINGS}\n⚠️ Cargo.toml workspace members changed but docs/Architecture.md was not updated"
+              fi
+            fi
+          fi
+          
+          # Config types changed → Configuration.md should too
+          if echo "$CHANGED" | grep -q 'config\.rs'; then
+            if ! echo "$CHANGED" | grep -q 'Configuration.md'; then
+              WARNINGS="${WARNINGS}\n⚠️ Config code changed but docs/Configuration.md was not updated"
+            fi
+          fi
+          
+          if [ -n "$WARNINGS" ]; then
+            echo "::warning::Potential documentation drift:${WARNINGS}"
+          else
+            echo "✅ No documentation drift detected"
+          fi
+
+  changelog:
+    name: Changelog
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Check changelog updated
+        run: |
+          CHANGED=$(git diff origin/main...HEAD --name-only)
+          HAS_RS=$(echo "$CHANGED" | grep '\.rs$' || true)
+          HAS_CHANGELOG=$(echo "$CHANGED" | grep 'CHANGELOG.md' || true)
+          
+          if [ -n "$HAS_RS" ] && [ -z "$HAS_CHANGELOG" ]; then
+            echo "::warning::Rust source files changed but CHANGELOG.md was not updated"
+          else
+            echo "✅ Changelog check passed"
+          fi
+
+  binary-size:
+    name: Binary Size
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: binary-size
+      - name: Build release
+        run: cargo build --release
+      - name: Report size
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const binary = 'target/release/pi-daemon';
+            
+            if (!fs.existsSync(binary)) {
+              console.log('Binary not found, skipping size check');
+              return;
+            }
+            
+            const size = fs.statSync(binary).size;
+            const sizeMB = (size / 1024 / 1024).toFixed(1);
+            
+            let msg = `## 📏 Binary Size: ${sizeMB} MB (${size.toLocaleString()} bytes)`;
+            if (size > 50 * 1024 * 1024) {
+              msg += `\n\n🔴 **Warning:** Binary exceeds 50MB target.`;
+            } else {
+              msg += `\n\n✅ Binary size is within acceptable range.`;
+            }
+            
+            // Find existing size comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+            });
+            const existing = comments.find(c => c.body.includes('📏 Binary Size'));
+            
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body: msg + '\n\n---\n*Updated on each commit*',
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body: msg + '\n\n---\n*Updated on each commit*',
+              });
+            }
+
   # ─── Build ──────────────────────────────────────────────
   build-release:
     name: Build (${{ matrix.target }})
@@ -335,7 +499,7 @@ jobs:
     name: PR Report
     runs-on: ubuntu-latest
     if: always() && github.event_name == 'pull_request'
-    needs: [lint, test-unit, test-integration, coverage, security, license-check, unused-deps, crate-doc-sync, build-release, msrv]
+    needs: [lint, test-unit, test-integration, coverage, security, license-check, unused-deps, crate-doc-sync, unsafe-check, todo-tracker, docs-drift, changelog, binary-size, build-release, msrv]
     steps:
       - name: Collect results
         uses: actions/github-script@v7
@@ -352,6 +516,11 @@ jobs:
               'license-check': '${{ needs.license-check.result }}',
               'unused-deps': '${{ needs.unused-deps.result }}',
               'crate-doc-sync': '${{ needs.crate-doc-sync.result }}',
+              'unsafe-check': '${{ needs.unsafe-check.result }}',
+              'todo-tracker': '${{ needs.todo-tracker.result }}',
+              'docs-drift': '${{ needs.docs-drift.result }}',
+              changelog: '${{ needs.changelog.result }}',
+              'binary-size': '${{ needs.binary-size.result }}',
             };
             
             const icon = (s) => s === 'success' ? '✅' : s === 'skipped' ? '⏭️' : '❌';

@@ -136,6 +136,12 @@ jobs:
               'License & Supply Chain',
               'Unused Dependencies',
               'Crate Docs Sync',
+              // Code quality checks
+              'Unsafe Code',
+              'TODO Tracker',
+              'Docs Drift',
+              'Changelog',
+              'Binary Size',
               // Documentation checks
               'Link Check',
               'Markdown Lint',
