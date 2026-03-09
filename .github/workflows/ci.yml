@@ -67,12 +67,9 @@ jobs:
           shared-key: test-${{ matrix.crate }}
 
       - name: Run unit tests
-        run: cargo test -p ${{ matrix.crate }} --lib --bins -- --nocapture
+        run: cargo test -p ${{ matrix.crate }} -- --nocapture
         env:
           RUST_LOG: debug
-
-      - name: Run doc tests
-        run: cargo test -p ${{ matrix.crate }} --doc
 
   # ─── Integration Tests ──────────────────────────────────
   test-integration:
