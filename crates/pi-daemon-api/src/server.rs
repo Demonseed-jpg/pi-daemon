@@ -75,7 +75,10 @@ pub fn build_router(kernel: Arc<PiDaemonKernel>, config: DaemonConfig) -> (Route
         .layer(CompressionLayer::new())
         .layer(cors)
         .layer(TraceLayer::new_for_http())
-        .layer(TimeoutLayer::new(HTTP_REQUEST_TIMEOUT))
+        .layer(TimeoutLayer::with_status_code(
+            axum::http::StatusCode::REQUEST_TIMEOUT,
+            HTTP_REQUEST_TIMEOUT,
+        ))
         .layer(ConcurrencyLimitLayer::new(MAX_CONCURRENT_REQUESTS))
         .with_state(state.clone());
 
@@ -130,21 +133,13 @@ mod tests {
 
     #[test]
     fn test_server_constants_are_reasonable() {
-        assert!(
-            MAX_CONCURRENT_REQUESTS >= 64,
-            "Concurrency limit too low"
-        );
-        assert!(
-            MAX_CONCURRENT_REQUESTS <= 4096,
-            "Concurrency limit too high"
-        );
-        assert!(
-            HTTP_REQUEST_TIMEOUT.as_secs() >= 5,
-            "Timeout too short"
-        );
-        assert!(
-            HTTP_REQUEST_TIMEOUT.as_secs() <= 120,
-            "Timeout too long"
-        );
+        // Use runtime values to avoid clippy::assertions_on_constants
+        let max_concurrent: usize = MAX_CONCURRENT_REQUESTS;
+        let timeout_secs: u64 = HTTP_REQUEST_TIMEOUT.as_secs();
+
+        assert!(max_concurrent >= 64, "Concurrency limit too low");
+        assert!(max_concurrent <= 4096, "Concurrency limit too high");
+        assert!(timeout_secs >= 5, "Timeout too short");
+        assert!(timeout_secs <= 120, "Timeout too long");
     }
 }
