@@ -131,11 +131,21 @@ jobs:
             const totalLine = lines.find(l => l.includes('TOTAL'));
             
             const commitSha = context.sha.slice(0, 7);
-            const body = "## 📊 Code Coverage (" + commitSha + ")\n\n" +
-              "```\n" + lines.slice(-10).join('\n') + "\n```\n\n" +
-              "<details>\n<summary>Full coverage report</summary>\n\n" +
-              "```\n" + summary + "\n```\n</details>\n\n" +
-              "*Coverage for commit: " + commitSha + "*";
+            const body = `## 📊 Code Coverage (${commitSha})
+
+\`\`\`
+${lines.slice(-10).join('\n')}
+\`\`\`
+
+<details>
+<summary>Full coverage report</summary>
+
+\`\`\`
+${summary}
+\`\`\`
+</details>
+
+*Coverage for commit: ${commitSha}*`;
             
             // Find existing coverage comment for this commit
             const { data: comments } = await github.rest.issues.listComments({
@@ -276,12 +286,15 @@ jobs:
             const header = allPassed ? '## ✅ All CI checks passed' : '## ❌ CI checks failed';
             
             const commitSha = context.sha.slice(0, 7);
-            const body = header + " (" + commitSha + ")\n\n" +
-              "| Status | Job | Result |\n" +
-              "|--------|-----|---------|\n" +
-              rows + "\n\n---\n" +
-              "*Run: [" + context.runId + "](" + context.serverUrl + "/" + context.repo.owner + "/" + context.repo.repo + "/actions/runs/" + context.runId + ")*\n" +
-              "*Commit: " + commitSha + "*";
+            const body = `${header} (${commitSha})
+
+| Status | Job | Result |
+|--------|-----|--------|
+${rows}
+
+---
+*Run: [${context.runId}](${context.serverUrl}/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId})*
+*Commit: ${commitSha}*`;
             
             // Find existing PR report comment
             const { data: comments } = await github.rest.issues.listComments({
