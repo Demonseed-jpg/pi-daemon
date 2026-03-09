@@ -26,10 +26,6 @@ const MAX_CONCURRENT_REQUESTS: usize = 256;
 /// stalled connections from accumulating under load.
 const HTTP_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// TCP keepalive interval. Sent on idle connections to detect dead peers at the
-/// TCP level, complementing the WebSocket-level keepalive in ws.rs.
-const TCP_KEEPALIVE: Duration = Duration::from_secs(60);
-
 /// Build the full API router.
 pub fn build_router(kernel: Arc<PiDaemonKernel>, config: DaemonConfig) -> (Router, Arc<AppState>) {
     let state = Arc::new(AppState::new(kernel, config));
@@ -102,13 +98,10 @@ pub async fn run_daemon(kernel: Arc<PiDaemonKernel>, config: DaemonConfig) -> an
     socket.bind(addr)?;
     let listener = socket.listen(1024)?;
 
-    // Configure TCP keepalive on accepted connections via the tcp_keepalive
-    // setting on the serve builder.
     axum::serve(
         listener,
         router.into_make_service_with_connect_info::<SocketAddr>(),
     )
-    .tcp_keepalive(Some(TCP_KEEPALIVE))
     .with_graceful_shutdown(async move {
         state.shutdown_notify.notified().await;
         info!("Graceful shutdown initiated");
@@ -133,17 +126,25 @@ mod tests {
         // Verify state is properly initialized
         assert_eq!(state.config.listen_addr, config.listen_addr);
         assert_eq!(state.config.default_model, config.default_model);
-
-        // Router should be non-null (can't easily test much more without integration)
-        // The actual routes are tested in integration tests
     }
 
     #[test]
     fn test_server_constants_are_reasonable() {
-        assert!(MAX_CONCURRENT_REQUESTS >= 64, "Concurrency limit too low");
-        assert!(MAX_CONCURRENT_REQUESTS <= 4096, "Concurrency limit too high");
-        assert!(HTTP_REQUEST_TIMEOUT.as_secs() >= 5, "Timeout too short");
-        assert!(HTTP_REQUEST_TIMEOUT.as_secs() <= 120, "Timeout too long");
-        assert!(TCP_KEEPALIVE.as_secs() >= 10, "Keepalive too frequent");
+        assert!(
+            MAX_CONCURRENT_REQUESTS >= 64,
+            "Concurrency limit too low"
+        );
+        assert!(
+            MAX_CONCURRENT_REQUESTS <= 4096,
+            "Concurrency limit too high"
+        );
+        assert!(
+            HTTP_REQUEST_TIMEOUT.as_secs() >= 5,
+            "Timeout too short"
+        );
+        assert!(
+            HTTP_REQUEST_TIMEOUT.as_secs() <= 120,
+            "Timeout too long"
+        );
     }
 }
