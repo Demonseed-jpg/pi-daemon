@@ -111,7 +111,7 @@ jobs:
 
   # ─── Architectural Review ──────────────────────────────
   architectural-review:
-    name: 🏗️ Architectural Review
+    name: Architectural Review
     runs-on: ubuntu-latest
     needs: [classify]
     if: needs.classify.outputs.need_arch_review == 'true'
@@ -210,7 +210,7 @@ jobs:
 
   # ─── Test Quality Review ────────────────────────────────
   test-quality-review:
-    name: 🧪 Test Quality Review
+    name: Test Quality Review
     runs-on: ubuntu-latest
     needs: [classify]
     if: needs.classify.outputs.need_test_review == 'true'
@@ -309,7 +309,7 @@ jobs:
 
   # ─── Configuration Review ───────────────────────────────
   configuration-review:
-    name: ⚙️ Configuration Review
+    name: Configuration Review
     runs-on: ubuntu-latest
     needs: [classify]
     if: needs.classify.outputs.need_config_review == 'true'
