@@ -1,50 +1,90 @@
-use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse};
+use axum::http::header;
+use axum::response::IntoResponse;
 
-/// GET / — serve the webchat page.
+/// ETag for cache validation, based on crate version.
+const ETAG: &str = concat!("\"pi-daemon-", env!("CARGO_PKG_VERSION"), "\"");
+
+/// The full HTML page, assembled at compile time.
+const WEBCHAT_HTML: &str = concat!(
+    include_str!("../static/index_head.html"),
+    "<style>\n",
+    include_str!("../static/css/theme.css"),
+    "\n",
+    include_str!("../static/css/layout.css"),
+    "\n",
+    include_str!("../static/css/components.css"),
+    "\n</style>\n",
+    "<script defer>\n",
+    include_str!("../static/vendor/alpine.min.js"),
+    "\n</script>\n",
+    "<script>\n",
+    include_str!("../static/vendor/marked.min.js"),
+    "\n",
+    include_str!("../static/js/app.js"),
+    "\n",
+    include_str!("../static/js/pages/chat.js"),
+    "\n",
+    include_str!("../static/js/pages/agents.js"),
+    "\n",
+    include_str!("../static/js/pages/overview.js"),
+    "\n",
+    include_str!("../static/js/pages/settings.js"),
+    "\n</script>\n",
+    include_str!("../static/index_body.html"),
+);
+
+/// GET / — Serve the webchat SPA.
 pub async fn webchat_page() -> impl IntoResponse {
-    // For now, return a simple placeholder
-    // Issue #9 will implement the full embedded SPA
-    let html = r#"
-<!DOCTYPE html>
-<html>
-<head>
-    <title>pi-daemon webchat</title>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-</head>
-<body>
-    <h1>pi-daemon webchat</h1>
-    <p>Webchat UI placeholder. Full implementation in issue #9.</p>
-    <p>Status: <span id="status">Checking...</span></p>
-    <script>
-        fetch('/api/health')
-            .then(r => r.json())
-            .then(data => {
-                document.getElementById('status').textContent = data.status === 'ok' ? 'Connected' : 'Error';
-            })
-            .catch(() => {
-                document.getElementById('status').textContent = 'Connection failed';
-            });
-    </script>
-</body>
-</html>
-"#.trim();
-
-    (StatusCode::OK, Html(html))
+    (
+        [
+            (header::CONTENT_TYPE, "text/html; charset=utf-8"),
+            (header::ETAG, ETAG),
+            (
+                header::CACHE_CONTROL,
+                "public, max-age=3600, must-revalidate",
+            ),
+        ],
+        WEBCHAT_HTML,
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::http::StatusCode;
 
     #[tokio::test]
     async fn test_webchat_page_returns_html() {
         let response = webchat_page().await.into_response();
         assert_eq!(response.status(), StatusCode::OK);
 
-        // Should have HTML content type (axum sets this automatically for Html response)
-        let content_type = response.headers().get("content-type");
-        assert!(content_type.is_some());
+        // Check content type
+        assert_eq!(
+            response
+                .headers()
+                .get(header::CONTENT_TYPE)
+                .unwrap()
+                .to_str()
+                .unwrap(),
+            "text/html; charset=utf-8"
+        );
+
+        // Check ETag is present
+        assert!(response.headers().get(header::ETAG).is_some());
+    }
+
+    #[test]
+    fn test_webchat_html_contains_required_elements() {
+        // Verify the assembled HTML contains required elements
+        assert!(WEBCHAT_HTML.contains("<!DOCTYPE html>"));
+        assert!(WEBCHAT_HTML.contains("PI-DAEMON"));
+        assert!(WEBCHAT_HTML.contains("x-data=\"app\""));
+        assert!(WEBCHAT_HTML.contains("Alpine"));
+        assert!(WEBCHAT_HTML.contains("marked"));
+    }
+
+    #[test]
+    fn test_etag_contains_version() {
+        assert!(ETAG.contains(env!("CARGO_PKG_VERSION")));
     }
 }

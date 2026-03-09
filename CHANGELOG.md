@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GitHub PAT authentication for private repo access (#6)
 - API server (`pi-daemon-api`) with Axum HTTP routes and shared state (#7)
 - WebSocket streaming chat handler with real-time messaging (#8)
+- Embedded webchat SPA with Alpine.js and responsive design (#9)
 - Comprehensive CI/CD pipeline with 25+ automated checks (#24)
 - Supply chain security checks with cargo-deny (#34)
 - Code quality checks: unsafe detection, TODO tracking, docs drift, binary size (#35)

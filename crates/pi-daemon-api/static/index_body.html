@@ -1,0 +1,223 @@
+<body x-data="app" :data-theme="theme">
+<div class="app-layout">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-header">
+      <h1>PI-DAEMON</h1>
+      <span class="version" x-text="'v' + version"></span>
+    </div>
+    <div class="sidebar-status" :class="{ connected: wsConnected }">
+      <span class="status-dot"></span>
+      <span x-text="wsConnected ? agentCount + ' agent(s)' : 'disconnected'"></span>
+    </div>
+    <div class="sidebar-nav">
+      <a :class="{ active: page === 'chat' }" @click="page = 'chat'">💬 Chat</a>
+      <a :class="{ active: page === 'agents' }" @click="page = 'agents'">🤖 Agents</a>
+      <a :class="{ active: page === 'overview' }" @click="page = 'overview'">📊 Overview</a>
+      <a :class="{ active: page === 'settings' }" @click="page = 'settings'">⚙️ Settings</a>
+    </div>
+    <div class="theme-toggle">
+      <button @click="toggleTheme()" x-text="theme === 'dark' ? '☀️' : '🌙'"></button>
+    </div>
+  </nav>
+
+  <!-- Main content area -->
+  <main class="main-content">
+    <!-- Chat page -->
+    <template x-if="page === 'chat'">
+      <div class="chat-page" x-data="chatPage">
+        <div class="chat-header">
+          <h2>Chat</h2>
+          <select x-model="selectedAgent" @change="agentChanged()">
+            <option value="">Select an agent...</option>
+            <template x-for="agent in agents" :key="agent.id">
+              <option :value="agent.id" x-text="agent.name"></option>
+            </template>
+          </select>
+        </div>
+        
+        <!-- Messages -->
+        <div class="chat-messages" x-ref="messages">
+          <template x-for="msg in messages" :key="msg.id">
+            <div class="chat-bubble" :class="msg.role">
+              <div class="bubble-content" x-html="renderMarkdown(msg.content)"></div>
+              <div class="bubble-meta" x-show="msg.tokens">
+                <span x-text="msg.tokens + ' tokens'"></span>
+                <span class="timestamp" x-text="formatTime(msg.timestamp)"></span>
+              </div>
+            </div>
+          </template>
+          <!-- Typing indicator -->
+          <div class="typing-indicator" x-show="isTyping">
+            <div class="typing-dots">
+              <span class="dot"></span>
+              <span class="dot"></span>
+              <span class="dot"></span>
+            </div>
+            <span class="typing-text" x-text="typingText"></span>
+          </div>
+        </div>
+        
+        <!-- Input -->
+        <div class="chat-input-area">
+          <div class="input-wrapper">
+            <textarea 
+              x-model="input" 
+              @keydown.enter.prevent="sendMessage()"
+              @input="adjustTextareaHeight()"
+              placeholder="Type a message..." 
+              rows="1" 
+              x-ref="input"
+              :disabled="!selectedAgent || !wsConnected"></textarea>
+            <button @click="sendMessage()" :disabled="!input.trim() || !selectedAgent || !wsConnected">
+              Send
+            </button>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Agents page -->
+    <template x-if="page === 'agents'">
+      <div class="agents-page" x-data="agentsPage">
+        <div class="page-header">
+          <h2>Agents</h2>
+          <button @click="loadAgents()">Refresh</button>
+        </div>
+        
+        <div class="agents-grid">
+          <template x-for="agent in agents" :key="agent.id">
+            <div class="agent-card" :class="{ online: agent.status === 'idle' }">
+              <div class="agent-header">
+                <span class="agent-name" x-text="agent.name"></span>
+                <span class="agent-status" x-text="agent.status"></span>
+              </div>
+              <div class="agent-details">
+                <div class="detail-row">
+                  <span class="label">Type:</span>
+                  <span x-text="agent.kind"></span>
+                </div>
+                <div class="detail-row" x-show="agent.model">
+                  <span class="label">Model:</span>
+                  <span x-text="agent.model"></span>
+                </div>
+                <div class="detail-row">
+                  <span class="label">Registered:</span>
+                  <span x-text="formatTime(agent.registered_at)"></span>
+                </div>
+                <div class="detail-row" x-show="agent.last_heartbeat">
+                  <span class="label">Last seen:</span>
+                  <span x-text="formatTime(agent.last_heartbeat)"></span>
+                </div>
+              </div>
+            </div>
+          </template>
+          
+          <div x-show="agents.length === 0" class="empty-state">
+            <p>No agents registered</p>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Overview page -->
+    <template x-if="page === 'overview'">
+      <div class="overview-page" x-data="overviewPage">
+        <div class="page-header">
+          <h2>Overview</h2>
+          <button @click="loadStatus()">Refresh</button>
+        </div>
+        
+        <div class="stats-grid">
+          <div class="stat-card">
+            <div class="stat-value" x-text="version"></div>
+            <div class="stat-label">Version</div>
+          </div>
+          
+          <div class="stat-card">
+            <div class="stat-value" x-text="formatUptime(uptime)"></div>
+            <div class="stat-label">Uptime</div>
+          </div>
+          
+          <div class="stat-card">
+            <div class="stat-value" x-text="agentCount"></div>
+            <div class="stat-label">Active Agents</div>
+          </div>
+          
+          <div class="stat-card" :class="{ connected: wsConnected }">
+            <div class="stat-value" x-text="wsConnected ? 'Connected' : 'Disconnected'"></div>
+            <div class="stat-label">WebSocket Status</div>
+          </div>
+        </div>
+        
+        <div class="recent-events">
+          <h3>Recent Events</h3>
+          <div class="events-list">
+            <template x-for="event in events" :key="event.id">
+              <div class="event-item">
+                <div class="event-time" x-text="formatTime(event.timestamp)"></div>
+                <div class="event-content">
+                  <span class="event-type" x-text="event.payload.type"></span>
+                  <span x-show="event.payload.name" x-text="'- ' + event.payload.name"></span>
+                </div>
+              </div>
+            </template>
+            
+            <div x-show="events.length === 0" class="empty-state">
+              <p>No recent events</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+
+    <!-- Settings page -->
+    <template x-if="page === 'settings'">
+      <div class="settings-page" x-data="settingsPage">
+        <div class="page-header">
+          <h2>Settings</h2>
+        </div>
+        
+        <div class="settings-sections">
+          <div class="settings-section">
+            <h3>Theme</h3>
+            <div class="setting-item">
+              <label>Color scheme:</label>
+              <select x-model="$root.theme" @change="$root.saveTheme()">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
+          </div>
+          
+          <div class="settings-section">
+            <h3>Connection</h3>
+            <div class="setting-item">
+              <label>WebSocket Status:</label>
+              <span :class="{ connected: $root.wsConnected }" x-text="$root.wsConnected ? 'Connected' : 'Disconnected'"></span>
+              <button @click="$root.reconnectWebSocket()">Reconnect</button>
+            </div>
+          </div>
+          
+          <div class="settings-section">
+            <h3>API Information</h3>
+            <div class="setting-item">
+              <label>Base URL:</label>
+              <code x-text="location.origin"></code>
+            </div>
+            <div class="setting-item">
+              <label>WebSocket URL:</label>
+              <code x-text="getWebSocketUrl()"></code>
+            </div>
+          </div>
+        </div>
+      </div>
+    </template>
+  </main>
+</div>
+
+<!-- Mobile menu overlay -->
+<div class="mobile-overlay" x-show="mobileMenuOpen" @click="mobileMenuOpen = false"></div>
+
+</body>
+</html>
