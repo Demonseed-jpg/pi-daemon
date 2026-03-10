@@ -23,29 +23,7 @@ env:
   MSRV: "1.94"
 
 jobs:
-  # ─── Lint ───────────────────────────────────────────────
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: lint
-
-      - name: Check formatting
-        run: cargo fmt --all -- --check
-
-      - name: Clippy (all targets, all features)
-        run: cargo clippy --all-targets --all-features -- -D warnings
-
-      - name: Check docs compile
-        run: cargo doc --no-deps --all-features
-        env:
-          RUSTDOCFLAGS: "-D warnings"
+  # ─── NOTE: Lint moved to _lint-format.yml (called by pr-pipeline.yml) ───
 
   # ─── Unit Tests ─────────────────────────────────────────
   test-unit:
@@ -80,7 +58,9 @@ jobs:
   test-integration:
     name: Integration Tests
     runs-on: ubuntu-latest
-    needs: [lint]  # Only run if lint passes
+    # NOTE: Previously needed [lint], but lint moved to pr-pipeline.yml.
+    # In Phase 2 (#126), tests will move to _test.yml under the orchestrator
+    # where the lint dependency is restored via needs: [lint-format].
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -498,13 +478,13 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-latest
-    needs: [lint, test-unit, test-integration, license-check, unused-deps, crate-doc-sync, build-release, msrv]
+    # NOTE: lint removed — now runs in pr-pipeline.yml via _lint-format.yml
+    needs: [test-unit, test-integration, license-check, unused-deps, crate-doc-sync, build-release, msrv]
     if: always()
     steps:
       - name: Check results
         run: |
-          if [ "${{ needs.lint.result }}" != "success" ] || \
-             [ "${{ needs.test-unit.result }}" != "success" ] || \
+          if [ "${{ needs.test-unit.result }}" != "success" ] || \
              [ "${{ needs.test-integration.result }}" != "success" ] || \
              [ "${{ needs.build-release.result }}" != "success" ] || \
              [ "${{ needs.msrv.result }}" != "success" ] || \
@@ -553,14 +533,15 @@ jobs:
     name: PR Report
     runs-on: ubuntu-latest
     if: always() && github.event_name == 'pull_request'
-    needs: [lint, test-unit, test-integration, coverage, security, license-check, unused-deps, crate-doc-sync, unsafe-check, todo-tracker, docs-drift, changelog, binary-size, build-release, test-bridge, msrv]
+    # NOTE: lint removed — now runs in pr-pipeline.yml via _lint-format.yml
+    needs: [test-unit, test-integration, coverage, security, license-check, unused-deps, crate-doc-sync, unsafe-check, todo-tracker, docs-drift, changelog, binary-size, build-release, test-bridge, msrv]
     steps:
       - name: Collect results
         uses: actions/github-script@v7
         with:
           script: |
             const jobs = {
-              lint: '${{ needs.lint.result }}',
+              // NOTE: lint moved to pr-pipeline.yml — reported there, not here
               'test-unit': '${{ needs.test-unit.result }}',
               'test-integration': '${{ needs.test-integration.result }}',
               coverage: '${{ needs.coverage.result }}',

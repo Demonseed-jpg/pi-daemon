@@ -29,6 +29,7 @@ on:
       - "PR Hygiene"
       - "Documentation"
       - "Architectural Review"
+      - "PR Pipeline"
     types: [completed]
   workflow_dispatch:
     inputs:

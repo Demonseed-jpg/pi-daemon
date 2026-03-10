@@ -1,0 +1,41 @@
+name: PR Pipeline
+
+# Orchestrator workflow — calls reusable workflows in dependency order.
+# Scope gate runs first; all other stages depend on it (directly or
+# transitively). If scope gate blocks, downstream jobs are skipped.
+#
+# Phase 1: scope-gate → lint-format
+# Phase 2+: will add test, security, build, code-review, sandbox, hygiene
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: pr-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  scope-gate:
+    if: github.actor != 'dependabot[bot]'
+    uses: ./.github/workflows/_scope-gate.yml
+    with:
+      pr_number: ${{ github.event.pull_request.number }}
+      pr_body: ${{ github.event.pull_request.body }}
+    permissions:
+      contents: read
+      pull-requests: write
+    secrets: inherit
+
+  lint-format:
+    needs: [scope-gate]
+    uses: ./.github/workflows/_lint-format.yml
+    permissions:
+      contents: read
+    secrets: inherit
