@@ -1,0 +1,93 @@
+name: Scope Gate
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+concurrency:
+  group: scope-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  scope-gate:
+    name: Scope Gate
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Gather PR metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          # Fetch additions/deletions
+          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}" \
+            --jq '.additions, .deletions' > /tmp/pr_stats.txt
+          echo "additions=$(sed -n '1p' /tmp/pr_stats.txt)" >> "$GITHUB_ENV"
+          echo "deletions=$(sed -n '2p' /tmp/pr_stats.txt)" >> "$GITHUB_ENV"
+
+          # Fetch changed file list (paginated)
+          gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" \
+            --paginate --jq '.[].filename' > /tmp/changed_files.txt
+
+      - name: Run scope gate
+        id: gate
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+          ADDITIONS: ${{ env.additions }}
+          DELETIONS: ${{ env.deletions }}
+        run: |
+          CHANGED_FILES=$(cat /tmp/changed_files.txt)
+          export CHANGED_FILES
+
+          set +e
+          bash scripts/scope-gate.sh
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Post or update PR comment
+        if: always()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          MARKER="Scope Gate v1"
+          COMMENT_FILE="/tmp/scope-gate-comment.md"
+
+          # Find any existing scope gate comment
+          EXISTING_ID=$(gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            --paginate --jq ".[] | select(.body | contains(\"${MARKER}\")) | .id" \
+            | head -1 || true)
+
+          if [ -s "$COMMENT_FILE" ]; then
+            # Comment has content — post or update
+            if [ -n "$EXISTING_ID" ]; then
+              gh api "repos/${{ github.repository }}/issues/comments/${EXISTING_ID}" \
+                --method PATCH -F "body=@${COMMENT_FILE}" > /dev/null
+              echo "Updated existing comment ${EXISTING_ID}"
+            else
+              gh api "repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+                --method POST -F "body=@${COMMENT_FILE}" > /dev/null
+              echo "Posted new comment"
+            fi
+          elif [ -n "$EXISTING_ID" ]; then
+            # Pass verdict, but a stale comment exists — remove it
+            gh api "repos/${{ github.repository }}/issues/comments/${EXISTING_ID}" \
+              --method DELETE > /dev/null
+            echo "Removed stale scope gate comment (PR now passes)"
+          else
+            echo "Scope gate passed — no comment needed"
+          fi
+
+      - name: Enforce verdict
+        if: always()
+        run: |
+          if [ "${{ steps.gate.outputs.exit_code }}" = "1" ]; then
+            echo "::error::Scope gate blocked this PR. See the PR comment for details."
+            exit 1
+          fi
