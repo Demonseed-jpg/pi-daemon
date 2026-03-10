@@ -30,7 +30,6 @@ concurrency:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   # ─── From commit-msg-scan.yml ───────────────────────────
@@ -97,55 +96,63 @@ jobs:
             echo "✅ All commit messages are clean"
           fi
 
-      - name: Comment on PR if secrets found
+      - name: Report commit-message secrets as annotations
         if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const report = fs.existsSync('/tmp/scan-report.md')
-              ? fs.readFileSync('/tmp/scan-report.md', 'utf8')
-              : 'Secret patterns detected in commit messages.';
+        run: |
+          # Commit-message secrets have no file/line context — emit ::error
+          # annotations without file= so they appear in the Annotations section.
+          FOUND=${{ steps.scan.outputs.found || '0' }}
 
-            const body = `## 🚨 Secrets Detected in Commit Messages
+          REPORT=""
+          if [ -f /tmp/scan-report.md ]; then
+            REPORT=$(cat /tmp/scan-report.md)
+          else
+            REPORT="Secret patterns detected in commit messages."
+          fi
 
-            This PR contains commit messages with potential secrets or environment variable dumps.
+          # Emit one annotation per finding (up to 10)
+          MAX_ANNOTATIONS=10
+          ANNOTATED=0
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          PATTERNS='(ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}|sk-or-v1-[a-f0-9]{64}|sk-ant-[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9]{20,}|sk-[a-zA-Z0-9]{48}|AKIA[0-9A-Z]{16}|glpat-[a-zA-Z0-9\-]{20,}|xoxb-[0-9]{10,}|xoxp-[0-9]{10,})'
+          ENV_PATTERNS='^(GH_TOKEN|OPENROUTER_API_KEY|NEO4J_PASSWORD|AWS_SECRET_ACCESS_KEY|GITHUB_TOKEN)=.+'
 
-            ${report}
+          for SHA in $(git rev-list "$BASE_SHA".."$HEAD_SHA" 2>/dev/null || true); do
+            MSG=$(git log --format="%B" -1 "$SHA" 2>/dev/null || true)
+            SHORT=$(git log --format="%h" -1 "$SHA" 2>/dev/null || true)
+            TOKEN_MATCH=$(echo "$MSG" | grep -E "$PATTERNS" || true)
+            ENV_MATCH=$(echo "$MSG" | grep -E "$ENV_PATTERNS" || true)
 
-            **This must be fixed before merge.** You need to rewrite the commit messages:
+            if [ -n "$TOKEN_MATCH" ] || [ -n "$ENV_MATCH" ]; then
+              if [ "$ANNOTATED" -lt "$MAX_ANNOTATIONS" ]; then
+                PATTERN_DESC=""
+                [ -n "$TOKEN_MATCH" ] && PATTERN_DESC="secret token"
+                [ -n "$ENV_MATCH" ] && PATTERN_DESC="${PATTERN_DESC:+$PATTERN_DESC + }env dump"
+                echo "::error::Secret pattern detected in commit message: ${SHORT} — ${PATTERN_DESC}"
+                ANNOTATED=$((ANNOTATED + 1))
+              fi
+            fi
+          done
 
-            1. \`git rebase -i <base-commit>\` and edit the offending commits
-            2. Remove the secrets from the commit messages
-            3. Force-push the branch
+          if [ "$FOUND" -gt "$MAX_ANNOTATIONS" ] 2>/dev/null; then
+            echo "::error::${FOUND} commit messages contain secrets (showing first ${MAX_ANNOTATIONS})"
+          fi
 
-            *🔒 Automated commit-message secret scan*`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-
-            const existing = comments.find(c =>
-              c.body && c.body.includes('Secrets Detected in Commit Messages')
-            );
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                comment_id: existing.id,
-                body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body,
-              });
-            }
+          # Full detail in step summary
+          {
+            echo "## 🚨 Secrets Detected in Commit Messages"
+            echo ""
+            echo "This PR contains commit messages with potential secrets or environment variable dumps."
+            echo ""
+            echo "$REPORT"
+            echo ""
+            echo "**This must be fixed before merge.** Rewrite the commit messages:"
+            echo ""
+            echo '1. `git rebase -i <base-commit>` and edit the offending commits'
+            echo "2. Remove the secrets from the commit messages"
+            echo "3. Force-push the branch"
+          } >> "$GITHUB_STEP_SUMMARY"
 
   # ─── From docs-check.yml ────────────────────────────────
   sidebar-sync:
@@ -179,49 +186,65 @@ jobs:
             echo "✅ Sidebar and files in sync"
           fi
 
-      - name: Report mismatch
+      - name: Report mismatch as annotations
         if: steps.check.outputs.mismatch == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const orphaned = `${{ steps.check.outputs.orphaned }}`.trim();
-            const dangling = `${{ steps.check.outputs.dangling }}`.trim();
+        run: |
+          ORPHANED="${{ steps.check.outputs.orphaned }}"
+          DANGLING="${{ steps.check.outputs.dangling }}"
+          MAX_ANNOTATIONS=10
+          ANNOTATED=0
 
-            let body = '## 📖 Sidebar / Files Mismatch\n\n';
+          # Orphaned pages: files in docs/ not listed in _Sidebar.md
+          if [ -n "$ORPHANED" ]; then
+            while IFS= read -r page; do
+              [ -n "$page" ] || continue
+              if [ "$ANNOTATED" -lt "$MAX_ANNOTATIONS" ]; then
+                echo "::warning file=docs/${page}.md::Not referenced in docs/_Sidebar.md"
+                ANNOTATED=$((ANNOTATED + 1))
+              fi
+            done <<< "$ORPHANED"
+          fi
 
-            if (orphaned) {
-              body += `**Pages not in sidebar** (add to \`docs/_Sidebar.md\`):\n`;
-              orphaned.split('\n').filter(Boolean).forEach(f => { body += `- \`${f}.md\`\n`; });
-              body += '\n';
-            }
+          # Dangling sidebar entries: listed in sidebar but no file exists
+          if [ -n "$DANGLING" ]; then
+            while IFS= read -r entry; do
+              [ -n "$entry" ] || continue
+              if [ "$ANNOTATED" -lt "$MAX_ANNOTATIONS" ]; then
+                echo "::warning file=docs/_Sidebar.md::Missing file for sidebar entry [[${entry}]]"
+                ANNOTATED=$((ANNOTATED + 1))
+              fi
+            done <<< "$DANGLING"
+          fi
 
-            if (dangling) {
-              body += `**Sidebar entries without files** (create the page or remove from sidebar):\n`;
-              dangling.split('\n').filter(Boolean).forEach(f => { body += `- \`[[${f}]]\`\n`; });
-              body += '\n';
-            }
+          TOTAL_ORPHANED=$(echo "$ORPHANED" | grep -c '\S' || echo "0")
+          TOTAL_DANGLING=$(echo "$DANGLING" | grep -c '\S' || echo "0")
+          TOTAL=$((TOTAL_ORPHANED + TOTAL_DANGLING))
 
-            body += '---\n*📖 Automated sidebar sync check*';
+          if [ "$TOTAL" -gt "$MAX_ANNOTATIONS" ]; then
+            echo "::warning::${TOTAL} sidebar mismatches found (showing first ${MAX_ANNOTATIONS} inline)"
+          fi
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body && c.body.includes('Sidebar / Files Mismatch'));
+          # Full detail in step summary
+          {
+            echo "## 📖 Sidebar / Files Mismatch"
+            echo ""
+            if [ -n "$ORPHANED" ]; then
+              echo "**Pages not in sidebar** (add to \`docs/_Sidebar.md\`):"
+              echo "$ORPHANED" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`${f}.md\`"
+              done
+              echo ""
+            fi
+            if [ -n "$DANGLING" ]; then
+              echo "**Sidebar entries without files** (create the page or remove from sidebar):"
+              echo "$DANGLING" | while IFS= read -r f; do
+                [ -n "$f" ] && echo "- \`[[${f}]]\`"
+              done
+              echo ""
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body,
-              });
-            }
-
-            core.setFailed('Sidebar and docs/ files are out of sync');
+          exit 1
 
   markdown-lint:
     name: Markdown Lint

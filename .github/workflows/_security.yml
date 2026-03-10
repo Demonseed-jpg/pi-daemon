@@ -60,49 +60,63 @@ jobs:
             2>&1 | tee /tmp/trufflehog_output.txt
         continue-on-error: true
 
-      - name: Report secrets
+      - name: Report secrets as annotations
         if: steps.scan.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const output = fs.readFileSync('/tmp/trufflehog_output.txt', 'utf8');
+        run: |
+          # Parse trufflehog output for file:line references and emit annotations.
+          # TruffleHog JSON output contains "SourceMetadata" with file/line info.
+          # Fall back to grep-based parsing for plain-text output.
+          TOTAL=0
+          ANNOTATED=0
+          MAX_ANNOTATIONS=10
 
-            const body = `## 🔴 Secrets Detected
+          # Try to extract file:line pairs from the output
+          while IFS= read -r line; do
+            # Match patterns like "File: path/to/file" or "file=path line=N"
+            file=$(echo "$line" | grep -oP '(?<=File: )\S+' || true)
+            lineno=$(echo "$line" | grep -oP '(?<=Line: )\d+' || true)
 
-            TruffleHog found verified secrets in this PR. **These must be removed before merge.**
+            if [ -n "$file" ]; then
+              TOTAL=$((TOTAL + 1))
+              if [ "$ANNOTATED" -lt "$MAX_ANNOTATIONS" ]; then
+                if [ -n "$lineno" ]; then
+                  echo "::error file=${file},line=${lineno}::Verified secret detected by TruffleHog"
+                else
+                  echo "::error file=${file}::Verified secret detected by TruffleHog"
+                fi
+                ANNOTATED=$((ANNOTATED + 1))
+              fi
+            fi
+          done < /tmp/trufflehog_output.txt
 
-            \`\`\`
-            ${output.slice(0, 3000)}
-            \`\`\`
+          # If no structured file refs found, count non-empty lines as findings
+          if [ "$TOTAL" -eq 0 ]; then
+            TOTAL=$(grep -c '\S' /tmp/trufflehog_output.txt || echo "1")
+            echo "::error::TruffleHog found verified secrets in this PR"
+          fi
 
-            ### How to fix
-            1. Remove the secret from the code
-            2. Rotate the compromised credential immediately
-            3. Use environment variables or \`~/.pi-daemon/config.toml\` for secrets
+          # Overflow: remaining findings go to step summary
+          if [ "$TOTAL" -gt "$MAX_ANNOTATIONS" ]; then
+            echo "::error::${TOTAL} secrets detected (showing first ${MAX_ANNOTATIONS} inline)"
+          fi
 
-            ---
-            *🔒 Automated secrets scan via TruffleHog*`;
+          # Always write full detail to step summary
+          {
+            echo "## 🔴 Secrets Detected"
+            echo ""
+            echo "TruffleHog found verified secrets in this PR. **These must be removed before merge.**"
+            echo ""
+            echo '```'
+            head -c 3000 /tmp/trufflehog_output.txt
+            echo '```'
+            echo ""
+            echo "### How to fix"
+            echo "1. Remove the secret from the code"
+            echo "2. Rotate the compromised credential immediately"
+            echo '3. Use environment variables or `~/.pi-daemon/config.toml` for secrets'
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body && c.body.includes('Secrets Detected'));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body,
-              });
-            }
-
-            core.setFailed('Verified secrets detected in PR');
+          exit 1
 
   # ─── Hardcoded Credential Patterns ──────────────────────
   credential-patterns:
@@ -118,64 +132,60 @@ jobs:
         run: |
           PATTERNS='(sk-ant-[a-zA-Z0-9]{20,}|sk-proj-[a-zA-Z0-9]{20,}|ghp_[a-zA-Z0-9]{36}|gho_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59}|glpat-[a-zA-Z0-9\-]{20,}|xoxb-[0-9]{10,}|xoxp-[0-9]{10,}|AKIA[0-9A-Z]{16})'
 
-          # Only scan the diff, not the entire repo
-          DIFF=$(git diff origin/main...HEAD -- ':!*.lock' ':!.github/workflows/_security.yml' 2>/dev/null || git diff HEAD~1 -- ':!*.lock' ':!.github/workflows/_security.yml' 2>/dev/null || echo "")
+          # Scan changed files (not the entire repo) with file:line context
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD -- ':!*.lock' ':!.github/workflows/_security.yml' 2>/dev/null \
+            || git diff --name-only HEAD~1 -- ':!*.lock' ':!.github/workflows/_security.yml' 2>/dev/null \
+            || echo "")
 
-          FOUND=$(echo "$DIFF" | grep -Pn "^\+" | grep -P "$PATTERNS" || true)
+          : > /tmp/credential_findings.txt
+          TOTAL=0
 
-          if [ -n "$FOUND" ]; then
-            echo "found=true" >> $GITHUB_OUTPUT
-            echo "$FOUND" > /tmp/credential_matches.txt
-            echo "::error::Potential API keys/tokens found in diff"
+          for f in $CHANGED_FILES; do
+            [ -f "$f" ] || continue
+            while IFS=: read -r lineno content; do
+              [ -n "$lineno" ] || continue
+              echo "${f}:${lineno}:${content}" >> /tmp/credential_findings.txt
+              TOTAL=$((TOTAL + 1))
+            done < <(grep -Pn "$PATTERNS" "$f" 2>/dev/null || true)
+          done
+
+          if [ "$TOTAL" -gt 0 ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+            echo "total=$TOTAL" >> "$GITHUB_OUTPUT"
+
+            # Emit up to 10 inline annotations
+            MAX_ANNOTATIONS=10
+            ANNOTATED=0
+            while IFS=: read -r file line content; do
+              if [ "$ANNOTATED" -lt "$MAX_ANNOTATIONS" ]; then
+                echo "::error file=${file},line=${line}::Potential hardcoded credential detected: ${content:0:80}"
+                ANNOTATED=$((ANNOTATED + 1))
+              fi
+            done < /tmp/credential_findings.txt
+
+            if [ "$TOTAL" -gt "$MAX_ANNOTATIONS" ]; then
+              echo "::error::${TOTAL} credential patterns found (showing first ${MAX_ANNOTATIONS} inline)"
+            fi
+
+            # Full detail in step summary
+            {
+              echo "## 🟡 Potential Credentials Detected"
+              echo ""
+              echo "Hardcoded credential patterns found in this PR's changed files:"
+              echo ""
+              echo '```'
+              head -c 2000 /tmp/credential_findings.txt
+              echo '```'
+              echo ""
+              echo "If these are intentional (e.g., regex patterns in a scanner), this warning can be ignored."
+              echo "Otherwise, move secrets to environment variables or config files."
+            } >> "$GITHUB_STEP_SUMMARY"
+
             exit 1
           else
-            echo "found=false" >> $GITHUB_OUTPUT
-            echo "No credential patterns found in diff"
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No credential patterns found in changed files"
           fi
-        continue-on-error: true
-
-      - name: Report credentials
-        if: steps.scan.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let matches = '';
-            try { matches = fs.readFileSync('/tmp/credential_matches.txt', 'utf8'); } catch {}
-
-            const body = `## 🟡 Potential Credentials Detected
-
-            Hardcoded credential patterns found in this PR's diff:
-
-            \`\`\`
-            ${matches.slice(0, 2000)}
-            \`\`\`
-
-            If these are intentional (e.g., regex patterns in a scanner), this warning can be ignored.
-            Otherwise, move secrets to environment variables or config files.
-
-            ---
-            *🔒 Automated credential pattern scan*`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body && c.body.includes('Potential Credentials Detected'));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body,
-              });
-            }
-
-            core.setFailed('Potential credential patterns found');
 
   # ─── License & Supply Chain ─────────────────────────────
   license-check:
@@ -310,56 +320,39 @@ jobs:
           fi
         continue-on-error: true
 
-      - name: Report npm vulnerabilities
+      - name: Report npm vulnerabilities as annotations
         if: steps.detect.outputs.found == 'true' && steps.audit.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            let results = '';
-            try { 
-              results = fs.readFileSync('/tmp/npm_audit_results.txt', 'utf8'); 
-            } catch { 
-              results = 'npm audit results not available'; 
-            }
+        run: |
+          # npm audit findings don't map to specific source lines — use
+          # a generic ::warning annotation plus $GITHUB_STEP_SUMMARY.
+          RESULTS=""
+          if [ -f /tmp/npm_audit_results.txt ]; then
+            RESULTS=$(cat /tmp/npm_audit_results.txt)
+          else
+            RESULTS="npm audit results not available"
+          fi
 
-            const body = `## 🔴 npm Security Vulnerabilities
+          VULN_COUNT=$(echo "$RESULTS" | grep -c '❌' || echo "0")
+          echo "::warning::npm audit found ${VULN_COUNT} project(s) with vulnerabilities"
 
-            npm security audit found vulnerabilities in JavaScript/TypeScript dependencies.
+          {
+            echo "## 🔴 npm Security Vulnerabilities"
+            echo ""
+            echo "npm security audit found vulnerabilities in JavaScript/TypeScript dependencies."
+            echo ""
+            echo "### Results Summary"
+            echo "$RESULTS"
+            echo ""
+            echo "### How to fix"
+            echo "1. **Run locally:** \`npm audit\` or \`yarn audit\` in affected directories"
+            echo "2. **Auto-fix:** \`npm audit fix\` for automated updates"
+            echo "3. **Manual review:** Check \`npm audit --audit-level moderate\` output"
+            echo "4. **Update deps:** Update vulnerable packages to patched versions"
+            echo ""
+            echo "### Package Manager Commands"
+            echo "- **npm:** \`npm audit\` → \`npm audit fix\`"
+            echo "- **Yarn:** \`yarn audit\` → \`yarn upgrade\`"
+            echo "- **pnpm:** \`pnpm audit\` → \`pnpm update\`"
+          } >> "$GITHUB_STEP_SUMMARY"
 
-            ### Results Summary
-            ${results}
-
-            ### How to fix
-            1. **Run locally:** \`npm audit\` or \`yarn audit\` in affected directories
-            2. **Auto-fix:** \`npm audit fix\` for automated updates
-            3. **Manual review:** Check \`npm audit --audit-level moderate\` output
-            4. **Update deps:** Update vulnerable packages to patched versions
-
-            ### Package Manager Commands
-            - **npm:** \`npm audit\` → \`npm audit fix\`
-            - **Yarn:** \`yarn audit\` → \`yarn upgrade\`  
-            - **pnpm:** \`pnpm audit\` → \`pnpm update\`
-
-            ---
-            *🔒 Automated npm security audit*`;
-
-            const { data: comments } = await github.rest.issues.listComments({
-              owner: context.repo.owner, repo: context.repo.repo,
-              issue_number: context.issue.number,
-            });
-            const existing = comments.find(c => c.body && c.body.includes('npm Security Vulnerabilities'));
-
-            if (existing) {
-              await github.rest.issues.updateComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                comment_id: existing.id, body,
-              });
-            } else {
-              await github.rest.issues.createComment({
-                owner: context.repo.owner, repo: context.repo.repo,
-                issue_number: context.issue.number, body,
-              });
-            }
-
-            core.setFailed('npm security vulnerabilities found');
+          exit 1
