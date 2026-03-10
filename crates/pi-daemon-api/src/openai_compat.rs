@@ -390,7 +390,7 @@ async fn discover_available_models(state: &AppState) -> Vec<ModelInfo> {
 
     // 1. Add the default model from configuration
     let default_model = &state.config.default_model;
-    if !default_model.is_empty() && seen_models.insert(default_model.clone()) {
+    if is_valid_model_name(default_model) && seen_models.insert(default_model.clone()) {
         models.push(ModelInfo {
             id: default_model.clone(),
             object: "model".to_string(),
@@ -403,7 +403,7 @@ async fn discover_available_models(state: &AppState) -> Vec<ModelInfo> {
     let registered_agents = state.kernel.registry.list();
     for agent in registered_agents {
         if let Some(model) = agent.model {
-            if !model.is_empty() && seen_models.insert(model.clone()) {
+            if is_valid_model_name(&model) && seen_models.insert(model.clone()) {
                 models.push(ModelInfo {
                     id: model.clone(),
                     object: "model".to_string(),
@@ -418,6 +418,13 @@ async fn discover_available_models(state: &AppState) -> Vec<ModelInfo> {
     add_provider_models(state, &mut models, &mut seen_models, created_timestamp);
 
     models
+}
+
+/// Validate that a model name is reasonable for inclusion in the models list.
+fn is_valid_model_name(model: &str) -> bool {
+    // Check for empty, whitespace-only, or unreasonably long model names
+    let trimmed = model.trim();
+    !trimmed.is_empty() && trimmed.len() <= 256 && !trimmed.chars().all(|c| c.is_whitespace())
 }
 
 /// Infer the model owner/provider from the model name.
@@ -669,6 +676,26 @@ mod tests {
         assert!(json.contains("gpt-4"));
         assert!(json.contains("anthropic"));
         assert!(json.contains("openai"));
+    }
+
+    #[test]
+    fn test_is_valid_model_name() {
+        // Valid model names
+        assert!(is_valid_model_name("gpt-4"));
+        assert!(is_valid_model_name("claude-3-sonnet"));
+        assert!(is_valid_model_name("company/model-name"));
+        assert!(is_valid_model_name("a")); // Single character is ok
+        
+        // Invalid model names
+        assert!(!is_valid_model_name("")); // Empty
+        assert!(!is_valid_model_name("   ")); // Whitespace only
+        assert!(!is_valid_model_name("\t\n  ")); // Various whitespace
+        assert!(!is_valid_model_name(&"x".repeat(257))); // Too long (>256 chars)
+        
+        // Edge cases
+        assert!(is_valid_model_name(" valid-model ")); // Trimmed, so valid
+        assert!(is_valid_model_name("model-with-123")); // Numbers ok
+        assert!(is_valid_model_name("model.with.dots")); // Dots ok
     }
 
     #[test]

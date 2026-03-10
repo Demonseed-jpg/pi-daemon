@@ -670,3 +670,273 @@ async fn test_models_endpoint_model_ownership_inference() {
         }
     }
 }
+
+#[tokio::test]
+async fn test_models_endpoint_filters_invalid_model_names() {
+    let server = FullTestServer::new().await;
+    let client = server.client();
+
+    // Register agents with various invalid model names
+    let invalid_models = vec![
+        ("empty-agent", ""),
+        ("whitespace-agent", "   "),
+        ("tab-agent", "\t\t"),
+        ("newline-agent", "\n"),
+        ("mixed-whitespace-agent", " \t\n "),
+    ];
+
+    for (name, model) in &invalid_models {
+        let response = client
+            .post_json(
+                "/api/agents",
+                &serde_json::json!({
+                    "name": name,
+                    "kind": "api_client",
+                    "model": model
+                }),
+            )
+            .await;
+        assert_eq!(response.status(), 201); // Agent should register successfully
+    }
+
+    // Register an agent with a valid model for comparison
+    let response = client
+        .post_json(
+            "/api/agents",
+            &serde_json::json!({
+                "name": "valid-agent",
+                "kind": "api_client",
+                "model": "valid-model-name"
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 201);
+
+    // Get models list
+    let response = client.get("/v1/models").await;
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let models = body["data"].as_array().unwrap();
+
+    // Should not include any invalid model names, but should include valid ones
+    let model_ids: Vec<&str> = models
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+
+    // Should include valid model and default model
+    assert!(model_ids.contains(&"valid-model-name"));
+    assert!(model_ids.iter().any(|id| id.contains("claude"))); // Default model
+
+    // Should not include any invalid models
+    for id in &model_ids {
+        assert!(!id.is_empty(), "No empty model IDs: {:?}", model_ids);
+        assert!(!id.trim().is_empty(), "No whitespace-only model IDs: {:?}", model_ids);
+        assert!(id.len() <= 256, "Model ID too long: {}", id);
+    }
+}
+
+#[tokio::test] 
+async fn test_models_endpoint_handles_very_long_model_names() {
+    let server = FullTestServer::new().await;
+    let client = server.client();
+
+    // Test with a very long model name (over 256 chars)
+    let long_model = "x".repeat(300);
+    let response = client
+        .post_json(
+            "/api/agents",
+            &serde_json::json!({
+                "name": "long-model-agent",
+                "kind": "api_client", 
+                "model": long_model
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 201);
+
+    // Test with exactly 256 chars (should be valid)
+    let max_model = "y".repeat(256);
+    let response = client
+        .post_json(
+            "/api/agents",
+            &serde_json::json!({
+                "name": "max-model-agent",
+                "kind": "api_client",
+                "model": max_model
+            }),
+        )
+        .await;
+    assert_eq!(response.status(), 201);
+
+    // Get models list
+    let response = client.get("/v1/models").await;
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let models = body["data"].as_array().unwrap();
+
+    let model_ids: Vec<&str> = models
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+
+    // Should include the 256-char model but not the 300-char model
+    assert!(model_ids.iter().any(|id| id.len() == 256));
+    assert!(!model_ids.iter().any(|id| id.len() == 300));
+}
+
+#[tokio::test]
+async fn test_models_endpoint_concurrent_access() {
+    let server = FullTestServer::new().await;
+    let client = server.client();
+
+    // Test concurrent access to the models endpoint
+    let mut handles = Vec::new();
+    
+    for i in 0..10 {
+        let client = client.clone();
+        handles.push(tokio::spawn(async move {
+            let response = client.get("/v1/models").await;
+            (i, response.status(), response.json::<serde_json::Value>().await)
+        }));
+    }
+
+    // All requests should succeed with consistent results
+    let mut all_models = Vec::new();
+    for handle in handles {
+        let (i, status, body_result) = handle.await.unwrap();
+        assert_eq!(status, 200, "Request {} should succeed", i);
+        
+        let body = body_result.unwrap();
+        assert_eq!(body["object"], "list");
+        assert!(body["data"].is_array());
+        
+        all_models.push(body["data"].as_array().unwrap().len());
+    }
+
+    // All concurrent requests should return the same number of models
+    // (assuming no agents are being registered/unregistered during test)
+    let first_count = all_models[0];
+    for (i, count) in all_models.iter().enumerate() {
+        assert_eq!(*count, first_count, "Request {} returned different model count", i);
+    }
+}
+
+#[tokio::test]
+async fn test_models_endpoint_with_special_characters() {
+    let server = FullTestServer::new().await;
+    let client = server.client();
+
+    // Test with various special characters that should be handled gracefully
+    let special_models = vec![
+        ("dots-agent", "model.with.dots"),
+        ("dashes-agent", "model-with-dashes"),
+        ("underscores-agent", "model_with_underscores"),
+        ("numbers-agent", "model123with456numbers"),
+        ("slashes-agent", "company/model-name"),
+    ];
+
+    for (name, model) in &special_models {
+        let response = client
+            .post_json(
+                "/api/agents",
+                &serde_json::json!({
+                    "name": name,
+                    "kind": "api_client",
+                    "model": model
+                }),
+            )
+            .await;
+        assert_eq!(response.status(), 201);
+    }
+
+    // Get models and verify all special character models are included
+    let response = client.get("/v1/models").await;
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let models = body["data"].as_array().unwrap();
+
+    let model_ids: Vec<&str> = models
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+
+    // All special character models should be included
+    for (_, expected_model) in &special_models {
+        assert!(
+            model_ids.contains(expected_model),
+            "Should include model '{}' but found: {:?}",
+            expected_model,
+            model_ids
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_models_endpoint_error_resilience() {
+    let server = FullTestServer::new().await;
+    let client = server.client();
+
+    // The models endpoint should never fail, even with edge case data
+    let response = client.get("/v1/models").await;
+    assert_eq!(response.status(), 200);
+
+    // Should always return valid JSON structure
+    let body: serde_json::Value = response.json().await.unwrap();
+    assert_eq!(body["object"], "list");
+    assert!(body["data"].is_array());
+
+    // Each model should have required fields
+    let models = body["data"].as_array().unwrap();
+    for model in models {
+        assert!(model["id"].is_string(), "Model should have string id");
+        assert_eq!(model["object"], "model");
+        assert!(model["created"].is_number(), "Model should have created timestamp");
+        assert!(model["owned_by"].is_string(), "Model should have owned_by");
+    }
+}
+
+#[tokio::test]
+async fn test_models_endpoint_with_configured_providers() {
+    // Create a config with some provider API keys configured
+    let config = pi_daemon_types::config::DaemonConfig {
+        providers: pi_daemon_types::config::ProvidersConfig {
+            anthropic_api_key: "test-anthropic-key".to_string(),
+            openai_api_key: "test-openai-key".to_string(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let server = FullTestServer::with_config(config).await;
+    let client = server.client();
+
+    let response = client.get("/v1/models").await;
+    assert_eq!(response.status(), 200);
+    let body: serde_json::Value = response.json().await.unwrap();
+    let models = body["data"].as_array().unwrap();
+
+    let model_ids: Vec<&str> = models
+        .iter()
+        .map(|m| m["id"].as_str().unwrap())
+        .collect();
+
+    // Should include well-known models from configured providers
+    let has_anthropic = model_ids.iter().any(|id| id.contains("claude"));
+    let has_openai = model_ids.iter().any(|id| id.contains("gpt"));
+
+    assert!(has_anthropic, "Should include Anthropic models when API key configured: {:?}", model_ids);
+    assert!(has_openai, "Should include OpenAI models when API key configured: {:?}", model_ids);
+
+    // Verify model ownership is correctly inferred
+    for model in models {
+        let id = model["id"].as_str().unwrap();
+        let owned_by = model["owned_by"].as_str().unwrap();
+        
+        if id.contains("claude") {
+            assert_eq!(owned_by, "anthropic", "Claude models should be owned by anthropic");
+        } else if id.contains("gpt") {
+            assert_eq!(owned_by, "openai", "GPT models should be owned by openai");
+        }
+    }
+}
