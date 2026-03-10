@@ -448,6 +448,28 @@ jobs:
               }
             }
 
+            // Clean-PASS guard: suppress to step summary when no actionable findings (#148)
+            const hasFindings = inlineComments.length > 0 || bodyActions.length > 0 || bodyIssues.length > 0;
+            if (verdict === 'PASS' && !hasFindings) {
+              // Stale review already dismissed above — write to step summary instead of createReview()
+              const summaryLines = [
+                `## ${icon} 🏗️ Architectural Review: PASS`,
+                '',
+                `Looked at ${sourceCount} source file${sourceCount === '1' ? '' : 's'}. ${review.summary || 'No issues found.'}`,
+              ];
+              if (Object.keys(scores).length > 0) {
+                summaryLines.push('', '| Score | Dimension |', '|-------|-----------|');
+                for (const [dim, score] of Object.entries(scores)) {
+                  const s = Number(score);
+                  const si = s === 0 ? '🔴' : s === 1 ? '🟡' : s === 2 ? '✅' : '🟢';
+                  summaryLines.push(`| ${si} ${s}/3 | ${dim} |`);
+                }
+              }
+              await core.summary.addRaw(summaryLines.join('\n')).write();
+              core.info('Clean PASS with no findings — wrote to step summary instead of PR review');
+              return;
+            }
+
             // Build review body
             let body = `${REVIEW_MARKER}\n## ${icon} 🏗️ Architectural Review: ${verdict}\n\n`;
             body += `Looked at ${sourceCount} source file${sourceCount === '1' ? '' : 's'}. `;
@@ -790,6 +812,28 @@ jobs:
                   bodyIssues.push(i.description);
                 }
               }
+            }
+
+            // Clean-PASS guard: suppress to step summary when no actionable findings (#148)
+            const hasFindings = inlineComments.length > 0 || bodyActions.length > 0 || bodyIssues.length > 0;
+            if (verdict === 'PASS' && !hasFindings) {
+              // Stale review already dismissed above — write to step summary instead of createReview()
+              const summaryLines = [
+                `## ${icon} 🧪 Test Quality Review: PASS`,
+                '',
+                `Reviewed ${testCount} test file${testCount === '1' ? '' : 's'}. ${review.summary || 'No issues found.'}`,
+              ];
+              if (Object.keys(scores).length > 0) {
+                summaryLines.push('', '| Score | Dimension |', '|-------|-----------|');
+                for (const [dim, score] of Object.entries(scores)) {
+                  const s = Number(score);
+                  const si = s === 0 ? '🔴' : s === 1 ? '🟡' : s === 2 ? '✅' : '🟢';
+                  summaryLines.push(`| ${si} ${s}/3 | ${dim} |`);
+                }
+              }
+              await core.summary.addRaw(summaryLines.join('\n')).write();
+              core.info('Clean PASS with no findings — wrote to step summary instead of PR review');
+              return;
             }
 
             // Build review body
@@ -1253,6 +1297,28 @@ jobs:
                   bodyIssues.push(`${sev} ${file}${i.description || ''}`);
                 }
               }
+            }
+
+            // Clean-PASS guard: suppress to step summary when no actionable findings (#148)
+            const hasFindings = inlineComments.length > 0 || bodyActions.length > 0 || bodyIssues.length > 0;
+            if (verdict === 'PASS' && !hasFindings) {
+              // Stale review already dismissed above — write to step summary instead of createReview()
+              const summaryLines = [
+                `## ${icon} ⚙️ Configuration Review: PASS`,
+                '',
+                `Checked ${configCount} config/docs file${configCount === '1' ? '' : 's'}. ${review.summary || 'No issues found.'}`,
+              ];
+              if (Object.keys(scores).length > 0) {
+                summaryLines.push('', '| Score | Dimension |', '|-------|-----------|');
+                for (const [dim, score] of Object.entries(scores)) {
+                  const s = Number(score);
+                  const si = s === 0 ? '🔴' : s === 1 ? '🟡' : s === 2 ? '✅' : '🟢';
+                  summaryLines.push(`| ${si} ${s}/3 | ${dim} |`);
+                }
+              }
+              await core.summary.addRaw(summaryLines.join('\n')).write();
+              core.info('Clean PASS with no findings — wrote to step summary instead of PR review');
+              return;
             }
 
             // Build review body

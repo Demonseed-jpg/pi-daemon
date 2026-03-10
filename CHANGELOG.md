@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Suppress clean-PASS LLM code reviews from PR conversation (#148)
+  - All 3 review types (architectural, test quality, configuration) now check for actionable findings before posting
+  - Clean PASS (verdict PASS + zero inline comments + zero body actions + zero body issues) writes to `$GITHUB_STEP_SUMMARY` instead of `pulls.createReview()`
+  - Stale reviews from previous pushes that had findings are still dismissed (existing dedup logic runs first)
+  - FAIL verdicts continue to post `createReview()` with `REQUEST_CHANGES` — no change
+  - PASS with findings (file+line annotations) continues to post `createReview()` with `COMMENT` — no change
+  - Eliminates the most common source of PR comment noise: config review PASS on every PR touching .yml or .md files
+
 ### Added
 - PR Output Layer Phase 4: Single auto-updating PR dashboard comment (#142)
   - `update-dashboard` job added to `pr-pipeline.yml` with `if: always()` and `needs: [all 9 stages]`
