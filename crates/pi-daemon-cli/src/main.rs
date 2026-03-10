@@ -121,12 +121,12 @@ async fn cmd_start(foreground: bool, listen_override: Option<String>) -> anyhow:
         println!("Use `pi-daemon chat` for terminal chat");
         println!("Use `pi-daemon stop` to stop the daemon");
         println!();
-        
+
         // For background mode, spawn a new process and exit this one
         return spawn_daemon_process(&config.listen_addr);
     }
 
-    // Initialize tracing AFTER daemonizing 
+    // Initialize tracing AFTER daemonizing
     if foreground {
         // In foreground mode, log to terminal with full verbosity
         tracing_subscriber::fmt()
@@ -207,40 +207,41 @@ async fn cmd_start(foreground: bool, listen_override: Option<String>) -> anyhow:
 /// Spawn the daemon process in the background and exit the parent
 fn spawn_daemon_process(listen_addr: &str) -> anyhow::Result<()> {
     use std::process::{Command, Stdio};
-    
+
     // Get the current executable path
     let exe_path = std::env::current_exe()
         .map_err(|e| anyhow::anyhow!("Failed to get current executable path: {}", e))?;
-    
+
     // Spawn a new process with --foreground flag but detached from terminal
     let mut cmd = Command::new(exe_path);
     cmd.args(["start", "--foreground", "--listen", listen_addr])
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    
+
     // On Unix, use process groups to detach from terminal
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        unsafe {
-            cmd.pre_exec(|| {
-                // Create new session to detach from terminal
+        cmd.pre_exec(|| {
+            // Create new session to detach from terminal
+            unsafe {
                 libc::setsid();
-                Ok(())
-            });
-        }
+            }
+            Ok(())
+        });
     }
-    
-    let child = cmd.spawn()
+
+    let child = cmd
+        .spawn()
         .map_err(|e| anyhow::anyhow!("Failed to spawn daemon process: {}", e))?;
-    
+
     // Don't wait for the child - let it run independently
     std::mem::forget(child);
-    
+
     // Give the daemon a moment to start before exiting
     std::thread::sleep(std::time::Duration::from_millis(500));
-    
+
     Ok(())
 }
 

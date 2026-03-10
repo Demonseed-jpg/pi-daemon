@@ -65,13 +65,13 @@ pub fn write_daemon_log(message: &str) -> Result<()> {
     if let Some(home_dir) = dirs::home_dir() {
         let pi_daemon_dir = home_dir.join(".pi-daemon");
         std::fs::create_dir_all(&pi_daemon_dir)?;
-        
+
         let log_file = pi_daemon_dir.join("daemon.log");
         let mut file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
             .open(log_file)?;
-        
+
         let timestamp = chrono::Utc::now().to_rfc3339();
         writeln!(file, "[{}] {}", timestamp, message)?;
         file.flush()?;
@@ -84,20 +84,20 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    #[test] 
+    #[test]
     fn test_write_daemon_log() {
         let temp_dir = TempDir::new().unwrap();
-        
+
         // Mock the home directory for testing
         std::env::set_var("HOME", temp_dir.path());
-        
+
         // Write a test message
         write_daemon_log("Test daemon started").unwrap();
-        
+
         // Check that the log file was created and contains our message
         let log_file = temp_dir.path().join(".pi-daemon/daemon.log");
         assert!(log_file.exists());
-        
+
         let contents = std::fs::read_to_string(log_file).unwrap();
         assert!(contents.contains("Test daemon started"));
         assert!(contents.contains("T")); // Should contain timestamp
@@ -110,7 +110,7 @@ mod tests {
         // because daemonize() calls exit() in the parent process
         // So we'll just test that the function exists and can be called
         // without panicking (though it won't actually daemonize in test)
-        
+
         // We can't actually test daemonization here because it would
         // interfere with the test runner. Integration tests would be better.
         assert!(true); // Placeholder to ensure the function compiles
