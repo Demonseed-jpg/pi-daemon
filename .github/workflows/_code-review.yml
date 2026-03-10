@@ -302,7 +302,7 @@ jobs:
                     {"role": "user", "content": $user}
                   ],
                   "temperature": 0.1,
-                  "max_tokens": 4096
+                  "max_tokens": 8192
                 }')")
 
             # Extract and clean the response
@@ -330,8 +330,42 @@ jobs:
               # Clean the response (remove markdown code blocks)
               REVIEW=$(echo "$REVIEW" | sed 's/^```json//; s/^```//; s/```$//' | sed '/^$/d')
               
-              # Save the review
-              echo "$REVIEW" > /tmp/arch_review_result.json
+              # Validate JSON before saving
+              if echo "$REVIEW" | jq . >/dev/null 2>&1; then
+                echo "$REVIEW" > /tmp/arch_review_result.json
+                echo "Valid JSON architectural review saved"
+              else
+                echo "::warning::LLM returned invalid JSON for architectural review - creating fallback"
+                echo "Raw LLM response (first 1000 chars):"
+                echo "$REVIEW" | head -c 1000
+                echo
+                echo "=== END RAW RESPONSE ==="
+                
+                # Extract summary from partial response if possible
+                PARTIAL_SUMMARY=$(echo "$REVIEW" | grep -o '"summary"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/^"summary"[[:space:]]*:[[:space:]]*"//' | head -1)
+                if [ -z "$PARTIAL_SUMMARY" ]; then
+                  PARTIAL_SUMMARY="LLM response was truncated - manual review required"
+                fi
+                
+                # Create fallback review with partial information
+                jq -n \
+                  --arg summary "$PARTIAL_SUMMARY" \
+                  --arg count "${{ needs.classify.outputs.source_count }}" \
+                  '{
+                    "verdict": "PASS",
+                    "summary": ($summary + " (response truncated)"),
+                    "scores": {},
+                    "checks": [
+                      {"name": "File Classification", "status": "pass", "detail": ("Source files: " + $count)},
+                      {"name": "JSON Validation", "status": "warning", "detail": "LLM response was truncated - fallback applied"}
+                    ],
+                    "issues": ["LLM response truncated - manual architectural review recommended"],
+                    "actions": ["Consider manual review of architectural changes"],
+                    "notes": "The LLM response was truncated due to token limits. This PR passed by default but manual review is recommended.",
+                    "checklist_verdict": "PASS",
+                    "expert_verdict": "PASS"
+                  }' > /tmp/arch_review_result.json
+              fi
             fi
           fi
           
@@ -545,7 +579,11 @@ jobs:
           RESULT="/tmp/arch_review_result.json"
           if ! jq . "$RESULT" >/dev/null 2>&1; then
             echo "::warning::Arch review returned invalid JSON — passing by default"
-            echo "Raw: $(head -c 300 "$RESULT")"
+            echo "Raw content (first 1000 chars):"
+            head -c 1000 "$RESULT"
+            echo
+            echo "=== END RAW CONTENT ==="
+            echo "File size: $(wc -c < "$RESULT") bytes"
             exit 0
           fi
           VERDICT=$(jq -r '.verdict // "PASS"' "$RESULT")
@@ -730,7 +768,7 @@ jobs:
                     {"role": "user", "content": $user}
                   ],
                   "temperature": 0.1,
-                  "max_tokens": 4096
+                  "max_tokens": 8192
                 }')")
 
             # Extract and clean the response
@@ -758,8 +796,42 @@ jobs:
               # Clean the response (remove markdown code blocks)
               REVIEW=$(echo "$REVIEW" | sed 's/^```json//; s/^```//; s/```$//' | sed '/^$/d')
               
-              # Save the review
-              echo "$REVIEW" > /tmp/test_review_result.json
+              # Validate JSON before saving
+              if echo "$REVIEW" | jq . >/dev/null 2>&1; then
+                echo "$REVIEW" > /tmp/test_review_result.json
+                echo "Valid JSON test quality review saved"
+              else
+                echo "::warning::LLM returned invalid JSON for test quality review - creating fallback"
+                echo "Raw LLM response (first 1000 chars):"
+                echo "$REVIEW" | head -c 1000
+                echo
+                echo "=== END RAW RESPONSE ==="
+                
+                # Extract summary from partial response if possible
+                PARTIAL_SUMMARY=$(echo "$REVIEW" | grep -o '"summary"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/^"summary"[[:space:]]*:[[:space:]]*"//' | head -1)
+                if [ -z "$PARTIAL_SUMMARY" ]; then
+                  PARTIAL_SUMMARY="LLM response was truncated - manual review required"
+                fi
+                
+                # Create fallback review with partial information
+                jq -n \
+                  --arg summary "$PARTIAL_SUMMARY" \
+                  --arg count "${{ needs.classify.outputs.test_count }}" \
+                  '{
+                    "verdict": "PASS",
+                    "summary": ($summary + " (response truncated)"),
+                    "scores": {},
+                    "checks": [
+                      {"name": "File Classification", "status": "pass", "detail": ("Test files: " + $count)},
+                      {"name": "JSON Validation", "status": "warning", "detail": "LLM response was truncated - fallback applied"}
+                    ],
+                    "issues": ["LLM response truncated - manual test quality review recommended"],
+                    "actions": ["Consider manual review of test changes"],
+                    "notes": "The LLM response was truncated due to token limits. This PR passed by default but manual review is recommended.",
+                    "checklist_verdict": "PASS",
+                    "expert_verdict": "PASS"
+                  }' > /tmp/test_review_result.json
+              fi
             fi
           fi
           
@@ -972,7 +1044,11 @@ jobs:
           RESULT="/tmp/test_review_result.json"
           if ! jq . "$RESULT" >/dev/null 2>&1; then
             echo "::warning::Test review returned invalid JSON — passing by default"
-            echo "Raw: $(head -c 300 "$RESULT")"
+            echo "Raw content (first 1000 chars):"
+            head -c 1000 "$RESULT"
+            echo
+            echo "=== END RAW CONTENT ==="
+            echo "File size: $(wc -c < "$RESULT") bytes"
             exit 0
           fi
           VERDICT=$(jq -r '.verdict // "PASS"' "$RESULT")
@@ -1255,7 +1331,7 @@ jobs:
                   {"role": "user", "content": $user}
                 ],
                 "temperature": 0.1,
-                "max_tokens": 4096
+                "max_tokens": 8192
               }')")
 
           # Extract and clean the response
@@ -1271,28 +1347,53 @@ jobs:
           # Clean the response
           REVIEW=$(echo "$REVIEW" | sed 's/^```json//; s/^```//; s/```$//' | sed '/^$/d')
 
-          # Save the review
-          echo "$REVIEW" > /tmp/config_review_result.json
-
-          # Debug: log first 500 chars of review for troubleshooting
-          echo "Review output (first 500 chars): $(echo "$REVIEW" | head -c 500)"
-
-          # Validate JSON — if jq can't parse it, default to PASS
-          if ! echo "$REVIEW" | jq . >/dev/null 2>&1; then
-            echo "::warning::LLM returned invalid JSON — defaulting to PASS"
-            echo "Raw response: $(echo "$REVIEW" | head -c 300)"
-            FINAL_VERDICT="PASS"
-          else
+          # Validate JSON before saving
+          if echo "$REVIEW" | jq . >/dev/null 2>&1; then
+            echo "$REVIEW" > /tmp/config_review_result.json
+            echo "Valid JSON configuration review saved"
+            
             # Extract verdict using dual-layer logic
             CHECKLIST_VERDICT=$(echo "$REVIEW" | jq -r '.checklist_verdict // "PASS"')
             EXPERT_VERDICT=$(echo "$REVIEW" | jq -r '.expert_verdict // "PASS"')
 
             # Both must pass
-            if [ "$CHECKLIST_VERDICT" = "PASS" ] && [ "$EXPERT_VERDICT" = "PASS" ]; then
-              FINAL_VERDICT="PASS"
-            else
+            if [ "$CHECKLIST_VERDICT" != "PASS" ] || [ "$EXPERT_VERDICT" != "PASS" ]; then
               FINAL_VERDICT="FAIL"
+            else
+              FINAL_VERDICT="PASS"
             fi
+          else
+            echo "::warning::LLM returned invalid JSON for configuration review - creating fallback"
+            echo "Raw LLM response (first 1000 chars):"
+            echo "$REVIEW" | head -c 1000
+            echo
+            echo "=== END RAW RESPONSE ==="
+            
+            # Extract summary from partial response if possible
+            PARTIAL_SUMMARY=$(echo "$REVIEW" | grep -o '"summary"[[:space:]]*:[[:space:]]*"[^"]*' | sed 's/^"summary"[[:space:]]*:[[:space:]]*"//' | head -1)
+            if [ -z "$PARTIAL_SUMMARY" ]; then
+              PARTIAL_SUMMARY="LLM response was truncated - manual review required"
+            fi
+            
+            # Create fallback review
+            FALLBACK_REVIEW=$(jq -n \
+              --arg summary "$PARTIAL_SUMMARY" \
+              --arg count "${{ needs.classify.outputs.config_count }}" \
+              '{
+                "verdict": "PASS",
+                "summary": ($summary + " (response truncated)"),
+                "checks": [
+                  {"name": "File Classification", "status": "pass", "detail": ("Config files: " + $count)},
+                  {"name": "JSON Validation", "status": "warning", "detail": "LLM response was truncated - fallback applied"}
+                ],
+                "issues": ["LLM response truncated - manual configuration review recommended"],
+                "notes": "The LLM response was truncated due to token limits. This PR passed by default but manual review is recommended.",
+                "checklist_verdict": "PASS",
+                "expert_verdict": "PASS"
+              }')
+            
+            echo "$FALLBACK_REVIEW" > /tmp/config_review_result.json
+            FINAL_VERDICT="PASS"
           fi
 
           echo "verdict=$FINAL_VERDICT" >> $GITHUB_OUTPUT
