@@ -68,10 +68,10 @@ mod tests {
         // because daemonize() calls exit() in the parent process
         // So we'll just test that the function exists and can be called
         // without panicking (though it won't actually daemonize in test)
-        
+
         // We can't actually test daemonization here because it would
         // interfere with the test runner. Integration tests would be better.
-        
+
         // Test that the function compiles and is accessible
         let _ = daemonize; // Ensure function is accessible
     }
