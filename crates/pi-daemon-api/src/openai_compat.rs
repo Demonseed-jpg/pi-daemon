@@ -1,6 +1,6 @@
 //! OpenAI-compatible API endpoints
 //!
-//! Implements the OpenAI API so any OpenAI-compatible client can connect to pi-daemon 
+//! Implements the OpenAI API so any OpenAI-compatible client can connect to pi-daemon
 //! agents. Includes /v1/chat/completions and /v1/models endpoints.
 
 use crate::state::AppState;
@@ -176,7 +176,7 @@ pub struct ErrorDetails {
 pub async fn models(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     let models = discover_available_models(&state).await;
     debug!("Models endpoint: returning {} models", models.len());
-    
+
     Json(ModelsResponse {
         object: "list".to_string(),
         data: models,
@@ -385,7 +385,7 @@ fn estimate_tokens(text: &str) -> u32 {
 }
 
 /// Discover available models from multiple sources.
-/// 
+///
 /// Note: This function performs in-memory operations only and is fast enough
 /// that caching is not currently needed. If performance becomes an issue with
 /// hundreds of agents, consider adding a TTL cache.
@@ -436,12 +436,15 @@ fn is_valid_model_name(model: &str) -> bool {
 /// Infer the model owner/provider from the model name.
 fn infer_model_owner(model_name: &str) -> String {
     let model_lower = model_name.to_lowercase();
-    
+
     if model_lower.contains("claude") || model_lower.contains("anthropic") {
         "anthropic".to_string()
     } else if model_lower.contains("gpt") || model_lower.contains("openai") {
         "openai".to_string()
-    } else if model_lower.contains("llama") || model_lower.contains("mistral") || model_lower.contains("codellama") {
+    } else if model_lower.contains("llama")
+        || model_lower.contains("mistral")
+        || model_lower.contains("codellama")
+    {
         "meta".to_string()
     } else if model_lower.contains("gemini") || model_lower.contains("palm") {
         "google".to_string()
@@ -470,12 +473,12 @@ fn add_provider_models(
     if !providers.anthropic_api_key.is_empty() {
         let anthropic_models = vec![
             "claude-3-5-sonnet-20241022",
-            "claude-3-5-haiku-20241022", 
+            "claude-3-5-haiku-20241022",
             "claude-3-opus-20240229",
             "claude-3-sonnet-20240229",
             "claude-3-haiku-20240307",
         ];
-        
+
         for model in anthropic_models {
             if seen_models.insert(model.to_string()) {
                 models.push(ModelInfo {
@@ -492,12 +495,12 @@ fn add_provider_models(
     if !providers.openai_api_key.is_empty() {
         let openai_models = vec![
             "gpt-4o",
-            "gpt-4o-mini", 
+            "gpt-4o-mini",
             "gpt-4-turbo",
             "gpt-4",
             "gpt-3.5-turbo",
         ];
-        
+
         for model in openai_models {
             if seen_models.insert(model.to_string()) {
                 models.push(ModelInfo {
@@ -510,7 +513,7 @@ fn add_provider_models(
         }
     }
 
-    // Note: We could add more providers (Ollama local models discovery, 
+    // Note: We could add more providers (Ollama local models discovery,
     // OpenRouter model listing, etc.) in the future by making HTTP calls
     // to their respective APIs, but for now we'll stick to well-known models
     // to keep the implementation performant and reliable.
@@ -669,7 +672,7 @@ mod tests {
                 },
                 ModelInfo {
                     id: "gpt-4".to_string(),
-                    object: "model".to_string(), 
+                    object: "model".to_string(),
                     created: 1700000000,
                     owned_by: "openai".to_string(),
                 },
@@ -691,13 +694,13 @@ mod tests {
         assert!(is_valid_model_name("claude-3-sonnet"));
         assert!(is_valid_model_name("company/model-name"));
         assert!(is_valid_model_name("a")); // Single character is ok
-        
+
         // Invalid model names
         assert!(!is_valid_model_name("")); // Empty
         assert!(!is_valid_model_name("   ")); // Whitespace only
         assert!(!is_valid_model_name("\t\n  ")); // Various whitespace
         assert!(!is_valid_model_name(&"x".repeat(257))); // Too long (>256 chars)
-        
+
         // Edge cases
         assert!(is_valid_model_name(" valid-model ")); // Trimmed, so valid
         assert!(is_valid_model_name("model-with-123")); // Numbers ok
@@ -712,7 +715,10 @@ mod tests {
         assert_eq!(infer_model_owner("gemini-pro"), "google");
         assert_eq!(infer_model_owner("anthropic/claude-3-opus"), "anthropic");
         assert_eq!(infer_model_owner("openai/gpt-4"), "openai");
-        assert_eq!(infer_model_owner("custom-company/special-model"), "custom-company");
+        assert_eq!(
+            infer_model_owner("custom-company/special-model"),
+            "custom-company"
+        );
         assert_eq!(infer_model_owner("unknown-model"), "unknown");
     }
 }
