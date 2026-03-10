@@ -452,6 +452,8 @@ Comprehensive code review system with intelligent file classification and specia
 
 **🔧 Implementation:** Full OpenRouter + Gemini 2.5 Flash integration with dual-layer analysis framework, size-based fallbacks, and comprehensive error handling for both Architectural and Test Quality reviews. Configuration Review has been LLM-powered since initial implementation. As of #139, all reviews use `pulls.createReview()` with inline annotations instead of `issues.createComment()`.
 
+**🔄 Workflow Step Ordering (#166):** Review creation steps are positioned **before** job failure steps to ensure inline comments are posted even when reviews fail. The execution order is: 1) Generate LLM analysis → 2) Create PR review with comments → 3) Fail job if needed. This guarantees authors receive actionable feedback with file/line annotations instead of just CI error messages.
+
 ---
 
 ## 📊 Metric Commit Statuses (#140)
