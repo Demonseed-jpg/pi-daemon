@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Default `listen_addr` changed from `127.0.0.1:4200` to `0.0.0.0:4200` for network access (#155)
+  - Enables webapp access from mobile devices (iOS, Android) and other network clients
+  - Added configuration documentation with security considerations
+  - Users requiring localhost-only access can set `PI_DAEMON_LISTEN_ADDR=127.0.0.1:4200`
+
 ### Fixed
 - Fix sandbox broken pipe error and add dynamic step summary (#153)
   - Replace `echo "$CONTENT" | grep -q` and `echo "$CONTENT" | wc -c` with here-strings in webchat step to avoid SIGPIPE on large (~128KB) output
