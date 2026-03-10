@@ -134,7 +134,7 @@ jobs:
           script: |
             const skipReason = '${{ steps.action.outputs.skip_reason }}';
             
-            // Create explanatory skip comment
+            // Create explanatory skip comment (no GitHub check needed - job status shows skip)
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -143,20 +143,6 @@ jobs:
                     "**Reason:** " + skipReason + "\n\n" +
                     "**Scope:** Architectural review focuses on source code files (.rs, .ts, .js) containing architectural decisions, design patterns, and code structure. This PR contains no source files to review architecturally.\n\n" +
                     "**Files in this PR:** Configuration files, documentation, or generated files only."
-            });
-            
-            // Create neutral skip check (different name to avoid duplicates)
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: 'Architectural Review (Skipped)',
-              head_sha: context.payload.pull_request.head.sha,
-              status: 'completed',
-              conclusion: 'neutral',
-              output: {
-                title: 'Architectural Review: SKIPPED',
-                summary: skipReason
-              }
             });
 
       - name: Checkout repo
@@ -284,7 +270,7 @@ jobs:
           script: |
             const skipReason = '${{ steps.action.outputs.skip_reason }}';
             
-            // Create explanatory skip comment
+            // Create explanatory skip comment (no GitHub check needed - job status shows skip)
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -293,20 +279,6 @@ jobs:
                     "**Reason:** " + skipReason + "\n\n" +
                     "**Scope:** Test quality review focuses on test files (test*.rs, *_test.go, *.test.ts, spec/) to analyze testing patterns, coverage quality, and test maintainability. This PR contains no test file changes to review.\n\n" +
                     "**Files in this PR:** Source code, configuration, or documentation files only."
-            });
-            
-            // Create neutral skip check (different name to avoid duplicates)
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: 'Test Quality Review (Skipped)',
-              head_sha: context.payload.pull_request.head.sha,
-              status: 'completed',
-              conclusion: 'neutral',
-              output: {
-                title: 'Test Quality Review: SKIPPED',
-                summary: skipReason
-              }
             });
 
       - name: Checkout repo
@@ -434,7 +406,7 @@ jobs:
           script: |
             const skipReason = '${{ steps.action.outputs.skip_reason }}';
             
-            // Create explanatory skip comment
+            // Create explanatory skip comment (no GitHub check needed - job status shows skip)
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -443,20 +415,6 @@ jobs:
                     "**Reason:** " + skipReason + "\n\n" +
                     "**Scope:** Configuration review focuses on DevOps and documentation files (.yml, .toml, .md) to analyze CI/CD patterns, documentation quality, and configuration best practices. This PR contains no configuration files to review.\n\n" +
                     "**Files in this PR:** Source code or test files only."
-            });
-            
-            // Create neutral skip check (different name to avoid duplicates)
-            await github.rest.checks.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              name: 'Configuration Review (Skipped)',
-              head_sha: context.payload.pull_request.head.sha,
-              status: 'completed',
-              conclusion: 'neutral',
-              output: {
-                title: 'Configuration Review: SKIPPED',
-                summary: skipReason
-              }
             });
 
       - name: Checkout repo
