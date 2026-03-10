@@ -218,8 +218,9 @@ Comprehensive code review system with intelligent file classification and specia
 - **⚙️ Configuration Review:** Config files (.yml, .toml, .md) for DevOps and documentation standards
 - **❌ Auto-Exclude:** Generated files (package-lock.json, node_modules/, dist/) to prevent token overflow
 - **🚀 Performance:** 75-97% faster execution through focused, conditional review execution
+- **🎯 Single Check per Review:** Job status shows pass/fail, detailed analysis in PR comments (no duplicate checks)
 
-**🎯 Multi-Review Architecture:**
+**🎯 Clean Single-Check Architecture:**
 
 ### 🏗️ Architectural Review (for source code)
 **Dual-Layer System:**

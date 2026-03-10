@@ -158,6 +158,16 @@ jobs:
           
           echo "Architectural review completed"
 
+      - name: Fail job if review failed  
+        run: |
+          # Read the verdict and fail job if review failed
+          VERDICT=$(cat /tmp/arch_review_result.json | jq -r '.verdict // "PASS"')
+          if [ "$VERDICT" != "PASS" ]; then
+            echo "::error::Architectural review failed: $VERDICT"
+            exit 1
+          fi
+          echo "Architectural review passed: $VERDICT"
+
       - name: Create Architectural Check
         uses: actions/github-script@v7
         with:
@@ -194,18 +204,12 @@ jobs:
               summary += `\n**Notes:** ${review.notes}\n`;
             }
 
-            // Create the check run
-            await github.rest.checks.create({
+            // Post detailed review as PR comment (job status provides pass/fail)
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Architectural Review',
-              head_sha: context.payload.pull_request.head.sha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: {
-                title: `🏗️ Architecture: ${verdict}`,
-                summary: summary,
-              },
+              issue_number: context.issue.number,
+              body: summary
             });
 
   # ─── Test Quality Review ────────────────────────────────
@@ -257,6 +261,16 @@ jobs:
           
           echo "Test quality review completed"
 
+      - name: Fail job if review failed
+        run: |
+          # Read the verdict and fail job if review failed  
+          VERDICT=$(cat /tmp/test_review_result.json | jq -r '.verdict // "PASS"')
+          if [ "$VERDICT" != "PASS" ]; then
+            echo "::error::Test quality review failed: $VERDICT"
+            exit 1
+          fi
+          echo "Test quality review passed: $VERDICT"
+
       - name: Create Test Quality Check
         uses: actions/github-script@v7
         with:
@@ -293,18 +307,12 @@ jobs:
               summary += `\n**Notes:** ${review.notes}\n`;
             }
 
-            // Create the check run
-            await github.rest.checks.create({
+            // Post detailed review as PR comment (job status provides pass/fail)
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Test Quality Review',
-              head_sha: context.payload.pull_request.head.sha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: {
-                title: `🧪 Test Quality: ${verdict}`,
-                summary: summary,
-              },
+              issue_number: context.issue.number,
+              body: summary
             });
 
   # ─── Configuration Review ───────────────────────────────
@@ -469,6 +477,16 @@ jobs:
           echo "verdict=$FINAL_VERDICT" >> $GITHUB_OUTPUT
           echo "Configuration review complete: $FINAL_VERDICT (Checklist: $CHECKLIST_VERDICT, Expert: $EXPERT_VERDICT)"
 
+      - name: Fail job if review failed
+        run: |
+          # Read the verdict and fail job if review failed
+          VERDICT=$(cat /tmp/config_review_result.json | jq -r '.verdict // "PASS"')
+          if [ "$VERDICT" != "PASS" ]; then
+            echo "::error::Configuration review failed: $VERDICT"
+            exit 1
+          fi
+          echo "Configuration review passed: $VERDICT"
+
       - name: Create Configuration Check
         uses: actions/github-script@v7
         with:
@@ -549,18 +567,12 @@ jobs:
               summary += `### 📝 Notes\n\n${review.notes}\n\n`;
             }
 
-            // Create the check run
-            await github.rest.checks.create({
+            // Post detailed review as PR comment (job status provides pass/fail)
+            await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Configuration Review',
-              head_sha: context.payload.pull_request.head.sha,
-              status: 'completed',
-              conclusion: conclusion,
-              output: {
-                title: `⚙️ Configuration: ${verdict}`,
-                summary: summary,
-              },
+              issue_number: context.issue.number,
+              body: summary
             });
 
   # ─── Code Review Gate ───────────────────────────────────
