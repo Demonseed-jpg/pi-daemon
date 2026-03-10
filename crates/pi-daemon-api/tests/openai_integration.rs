@@ -897,6 +897,32 @@ async fn test_models_endpoint_error_resilience() {
 }
 
 #[tokio::test]
+async fn test_models_endpoint_http_methods() {
+    let server = FullTestServer::new().await;
+    let client = server.client();
+
+    // GET should work
+    let response = client.get("/v1/models").await;
+    assert_eq!(response.status(), 200);
+
+    // POST should not be allowed (405 Method Not Allowed)
+    let response = client
+        .post_json("/v1/models", &serde_json::json!({}))
+        .await;
+    assert_eq!(response.status(), 405);
+
+    // PUT should not be allowed
+    let response = client
+        .put_json("/v1/models", &serde_json::json!({}))
+        .await;
+    assert_eq!(response.status(), 405);
+
+    // DELETE should not be allowed
+    let response = client.delete("/v1/models").await;
+    assert_eq!(response.status(), 405);
+}
+
+#[tokio::test]
 async fn test_models_endpoint_with_configured_providers() {
     // Create a config with some provider API keys configured
     let config = pi_daemon_types::config::DaemonConfig {
