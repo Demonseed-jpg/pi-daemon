@@ -143,6 +143,17 @@ cargo fmt --all                       # Always format
 
 **Do not accumulate errors.** Build after every file you create or modify. If something doesn't compile, fix it before moving on.
 
+### Step 4.5: Scope Check (Before Pushing)
+
+**Before pushing**, evaluate your changes against the Scope Gate thresholds:
+
+> - If your changes exceed **800 lines** total (additions + deletions), consider splitting.
+> - If your changes touch more than **2 workstreams** (source, ci-workflows, docs, scripts, pr-template, test-infra), split them.
+> - If the referenced issue describes **3+ pillars/phases/steps**, implement only **one** per PR. Create separate PRs for each.
+> - If your PR modifies files outside what the issue describes (e.g., CI workflows when the issue is about API routes), move those changes to a separate PR.
+
+The Scope Gate CI check will block PRs that violate these rules. Don't waste a CI cycle — split proactively. Run `bash scripts/scope-gate.sh` locally with the appropriate env vars to test before pushing.
+
 ### Step 5: Commit and Push
 
 ```bash

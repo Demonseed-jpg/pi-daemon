@@ -327,6 +327,418 @@ export DELETIONS=300
 export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
 run_test "block overrides warn" "block"
 
+# ═══════════════════════════════════════════════════════════
+# Phase 2 Tests: Issue Alignment Validation
+# ═══════════════════════════════════════════════════════════
+
+echo ""
+echo "═══ Phase 2: Issue Alignment Validation ═══"
+
+# ─── Test 25: Issue with 3+ pillars → block ──────────────
+echo ""
+echo "25. Issue with 3 pillars/phases blocks"
+export PR_BODY="Closes #116"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
+export ISSUE_TITLE="Testing Suite Revamp"
+export ISSUE_BODY_TEXT="## Overview
+Revamp the testing suite.
+
+### Pillar 1: Test Infrastructure
+Rebuild test-utils.
+
+### Pillar 2: LLM Prompt Engineering
+Improve code review prompts.
+
+### Pillar 3: Self-Updating PR Template
+Auto-generate PR templates.
+
+## Acceptance Criteria
+- [ ] Tests pass"
+run_test "3 pillars blocks" "block"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 26: Issue with 2 pillars → no block from pillars
+echo ""
+echo "26. Issue with 2 pillars does not block (on pillars alone)"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
+export ISSUE_TITLE="Memory API improvements"
+export ISSUE_BODY_TEXT="## Overview
+Improve memory API.
+
+### Phase 1: Read path optimization
+Speed up reads.
+
+### Phase 2: Write path optimization
+Speed up writes.
+
+## Acceptance Criteria
+- [ ] Reads are faster
+- [ ] Writes are faster"
+run_test "2 pillars passes" "pass"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 27: Issue with 15+ ACs across 5+ sections → warn
+echo ""
+echo "27. Issue with 16 acceptance criteria across 6 sections warns"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
+export ISSUE_TITLE="Big feature"
+export ISSUE_BODY_TEXT="## Overview
+Big change.
+
+## Section A
+Details.
+
+## Section B
+Details.
+
+## Section C
+Details.
+
+## Section D
+Details.
+
+## Section E
+Details.
+
+## Section F
+Details.
+
+## Acceptance Criteria
+- [ ] AC 1
+- [ ] AC 2
+- [ ] AC 3
+- [ ] AC 4
+- [ ] AC 5
+- [ ] AC 6
+- [ ] AC 7
+- [ ] AC 8
+- [ ] AC 9
+- [ ] AC 10
+- [ ] AC 11
+- [ ] AC 12
+- [ ] AC 13
+- [ ] AC 14
+- [ ] AC 15
+- [ ] AC 16"
+run_test "16 ACs 6 sections warns" "warn"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 28: 15 ACs but only 5 sections → no warn ──────
+echo ""
+echo "28. 15 ACs but only 5 sections does not warn"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
+export ISSUE_TITLE="Medium feature"
+export ISSUE_BODY_TEXT="## Overview
+A feature.
+
+## Design
+Details.
+
+## Implementation
+Details.
+
+## Testing
+Details.
+
+## Rollout
+Details.
+
+## Acceptance Criteria
+- [ ] AC 1
+- [ ] AC 2
+- [ ] AC 3
+- [ ] AC 4
+- [ ] AC 5
+- [ ] AC 6
+- [ ] AC 7
+- [ ] AC 8
+- [ ] AC 9
+- [ ] AC 10
+- [ ] AC 11
+- [ ] AC 12
+- [ ] AC 13
+- [ ] AC 14
+- [ ] AC 15"
+run_test "15 ACs 5 sections passes" "pass"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 29: PR touches workflows, issue doesn't mention CI → warn
+echo ""
+echo "29. PR modifies workflows but issue doesn't mention CI"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+.github/workflows/ci.yml"
+export ISSUE_TITLE="Improve API routes"
+export ISSUE_BODY_TEXT="## Overview
+Improve the REST API routes for better error handling.
+
+## Acceptance Criteria
+- [ ] Better error messages"
+run_test "workflow mismatch warns" "warn"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 30: PR touches workflows, issue DOES mention CI → no alignment warn
+echo ""
+echo "30. PR modifies workflows and issue mentions CI (no alignment warn)"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+.github/workflows/ci.yml"
+export ISSUE_TITLE="Improve CI pipeline and API routes"
+export ISSUE_BODY_TEXT="## Overview
+Update the CI workflow and API routes.
+
+## Acceptance Criteria
+- [ ] CI passes
+- [ ] Routes improved"
+run_test "workflow match passes" "pass"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 31: PR touches docs, issue doesn't mention docs → warn
+echo ""
+echo "31. PR modifies docs but issue doesn't mention documentation"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+docs/Architecture.md"
+export ISSUE_TITLE="Implement memory API"
+export ISSUE_BODY_TEXT="## Overview
+Implement the memory substrate API.
+
+## Acceptance Criteria
+- [ ] API works"
+run_test "docs mismatch warns" "warn"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 32: PR touches PR template, issue doesn't mention templates → warn
+echo ""
+echo "32. PR modifies PR template but issue doesn't mention templates"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+.github/pull_request_template.md"
+export ISSUE_TITLE="Improve API"
+export ISSUE_BODY_TEXT="## Overview
+Better API.
+
+## Acceptance Criteria
+- [ ] Done"
+run_test "template mismatch warns" "warn"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 33: PR touches scripts, issue doesn't mention scripts → warn
+echo ""
+echo "33. PR modifies scripts but issue doesn't mention scripts"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+scripts/deploy.sh"
+export ISSUE_TITLE="API improvements"
+export ISSUE_BODY_TEXT="## Overview
+API work.
+
+## Acceptance Criteria
+- [ ] Done"
+run_test "scripts mismatch warns" "warn"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 34: PR touches test-infra, issue doesn't mention it → warn
+echo ""
+echo "34. PR modifies test-infra but issue doesn't mention test utils"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+crates/pi-daemon-test-utils/src/client.rs"
+export ISSUE_TITLE="API improvements"
+export ISSUE_BODY_TEXT="## Overview
+Improve API routes.
+
+## Acceptance Criteria
+- [ ] Done"
+run_test "test-infra mismatch warns" "warn"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 35: No issue body (Phase 2 checks skipped gracefully)
+echo ""
+echo "35. No issue body — Phase 2 checks skipped gracefully"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+.github/workflows/ci.yml"
+unset ISSUE_TITLE 2>/dev/null || true
+unset ISSUE_BODY_TEXT 2>/dev/null || true
+export ISSUE_TITLE=""
+export ISSUE_BODY_TEXT=""
+run_test "no issue body skips phase 2" "pass"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 36: Pillar block + alignment warn combined ─────
+echo ""
+echo "36. Multi-concern issue with alignment mismatch"
+export PR_BODY="Closes #116"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+.github/workflows/ci.yml"
+export ISSUE_TITLE="Testing Suite Revamp"
+export ISSUE_BODY_TEXT="## Overview
+Three-part overhaul.
+
+### Pillar 1: Tests
+More tests.
+
+### Pillar 2: LLM Prompts
+Better prompts.
+
+### Pillar 3: PR Template
+New template.
+
+## Acceptance Criteria
+- [ ] Done"
+run_test "pillar block + alignment warn = block" "block"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 37: Issue mentions docs, PR changes docs → no warn
+echo ""
+echo "37. Issue mentions documentation, PR changes docs (no alignment warn)"
+export PR_BODY="Closes #50"
+export ADDITIONS=200
+export DELETIONS=50
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs
+docs/API-Reference.md"
+export ISSUE_TITLE="API routes with documentation updates"
+export ISSUE_BODY_TEXT="## Overview
+Update API routes and update the documentation.
+
+## Acceptance Criteria
+- [ ] Routes updated
+- [ ] Docs updated"
+run_test "docs mentioned in issue passes" "pass"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 38: 5 pillars in issue → block ─────────────────
+echo ""
+echo "38. Issue with 5 phases blocks (even with small PR)"
+export PR_BODY="Closes #100"
+export ADDITIONS=50
+export DELETIONS=10
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
+export ISSUE_TITLE="Multi-phase project"
+export ISSUE_BODY_TEXT="## Overview
+Five phases.
+
+### Phase 1: Foundation
+Build it.
+
+### Phase 2: API
+Route it.
+
+### Phase 3: Testing
+Test it.
+
+### Phase 4: Docs
+Document it.
+
+### Phase 5: Deploy
+Ship it.
+
+## Acceptance Criteria
+- [ ] Done"
+run_test "5 phases blocks" "block"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 39: Step numbering also detected ────────────────
+echo ""
+echo "39. 'Step N' headers also counted as pillars"
+export PR_BODY="Closes #100"
+export ADDITIONS=50
+export DELETIONS=10
+export CHANGED_FILES="crates/pi-daemon-api/src/routes.rs"
+export ISSUE_TITLE="Setup guide"
+export ISSUE_BODY_TEXT="## Overview
+Multi-step setup.
+
+### Step 1: Install
+Install deps.
+
+### Step 2: Configure
+Configure things.
+
+### Step 3: Deploy
+Deploy it.
+
+## Acceptance Criteria
+- [ ] Done"
+run_test "3 steps blocks" "block"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
+# ─── Test 40: Phase 1 + Phase 2 combined (real world) ────
+echo ""
+echo "40. Real-world: PR #117 with issue body (pillar block + size block + workstreams)"
+export PR_BODY="Closes #116"
+export ADDITIONS=1877
+export DELETIONS=662
+export CHANGED_FILES="crates/pi-daemon-test-utils/src/server.rs
+crates/pi-daemon-test-utils/src/client.rs
+crates/pi-daemon-test-utils/src/macros.rs
+crates/pi-daemon-test-utils/src/lib.rs
+crates/pi-daemon-test-utils/tests/integration.rs
+crates/pi-daemon-api/tests/api_integration.rs
+crates/pi-daemon-api/tests/openai_integration.rs
+crates/pi-daemon-api/tests/webchat_integration.rs
+crates/pi-daemon-api/tests/websocket_integration.rs
+crates/pi-daemon-api/src/routes.rs
+crates/pi-daemon-kernel/tests/kernel_lifecycle.rs
+crates/pi-daemon-kernel/src/kernel.rs
+.github/workflows/code-review.yml
+.github/workflows/ci.yml
+.github/workflows/sandbox-test.yml
+docs/Testing.md
+docs/PR-Reviews.md
+docs/Contributing.md
+.github/pull_request_template.md
+scripts/test-local.sh
+Cargo.toml
+CHANGELOG.md"
+export ISSUE_TITLE="Testing Suite Revamp: Enhanced Tests, LLM Prompt Engineering, Self-Updating PR Template"
+export ISSUE_BODY_TEXT="## Overview
+Three-pillar overhaul of the testing and review system.
+
+### Pillar 1: Test Infrastructure
+Rebuild test-utils with FullTestServer, expand integration tests.
+
+### Pillar 2: LLM Prompt Engineering
+Inject project docs into LLM review prompts, add scoring rubric.
+
+### Pillar 3: Self-Updating PR Template
+Auto-generate PR template with per-crate checklists.
+
+## Acceptance Criteria
+- [ ] Tests pass
+- [ ] LLM prompts improved
+- [ ] Template auto-updates"
+run_test "PR #117 with issue body: multi-block" "block"
+unset ISSUE_TITLE ISSUE_BODY_TEXT
+
 # ─── Summary ─────────────────────────────────────────────
 echo ""
 echo "━━━ Results ━━━"

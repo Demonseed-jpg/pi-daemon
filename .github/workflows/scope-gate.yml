@@ -36,6 +36,25 @@ jobs:
           gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/files" \
             --paginate --jq '.[].filename' > /tmp/changed_files.txt
 
+      - name: Fetch referenced issue (Phase 2)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          # Extract issue number from PR body
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oiP '(?:closes?|fixes?|refs?|implements?)\s+#(\d+)' | grep -oP '\d+' | head -1 || true)
+
+          if [ -n "$ISSUE_NUM" ]; then
+            echo "Fetching issue #${ISSUE_NUM}..."
+            gh issue view "$ISSUE_NUM" --json title,body \
+              --jq '.title' > /tmp/issue_title.txt 2>/dev/null || true
+            gh issue view "$ISSUE_NUM" --json title,body \
+              --jq '.body' > /tmp/issue_body.txt 2>/dev/null || true
+          else
+            : > /tmp/issue_title.txt
+            : > /tmp/issue_body.txt
+          fi
+
       - name: Run scope gate
         id: gate
         env:
@@ -45,6 +64,16 @@ jobs:
         run: |
           CHANGED_FILES=$(cat /tmp/changed_files.txt)
           export CHANGED_FILES
+
+          # Phase 2: pass issue metadata to the gate
+          if [ -s /tmp/issue_title.txt ]; then
+            ISSUE_TITLE=$(cat /tmp/issue_title.txt)
+            export ISSUE_TITLE
+          fi
+          if [ -s /tmp/issue_body.txt ]; then
+            ISSUE_BODY_TEXT=$(cat /tmp/issue_body.txt)
+            export ISSUE_BODY_TEXT
+          fi
 
           set +e
           bash scripts/scope-gate.sh
@@ -56,7 +85,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
-          MARKER="Scope Gate v1"
+          MARKER="Scope Gate v"
           COMMENT_FILE="/tmp/scope-gate-comment.md"
 
           # Find any existing scope gate comment
