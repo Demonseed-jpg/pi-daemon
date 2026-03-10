@@ -191,6 +191,7 @@ jobs:
           echo "Architectural review completed"
 
       - name: Fail job if review failed  
+        if: steps.action.outputs.action == 'review'
         run: |
           # Read the verdict and fail job if review failed
           VERDICT=$(cat /tmp/arch_review_result.json | jq -r '.verdict // "PASS"')
@@ -327,6 +328,7 @@ jobs:
           echo "Test quality review completed"
 
       - name: Fail job if review failed
+        if: steps.action.outputs.action == 'review'
         run: |
           # Read the verdict and fail job if review failed  
           VERDICT=$(cat /tmp/test_review_result.json | jq -r '.verdict // "PASS"')
@@ -578,6 +580,7 @@ jobs:
           echo "Configuration review complete: $FINAL_VERDICT (Checklist: $CHECKLIST_VERDICT, Expert: $EXPERT_VERDICT)"
 
       - name: Fail job if review failed
+        if: steps.action.outputs.action == 'review'
         run: |
           # Read the verdict and fail job if review failed
           VERDICT=$(cat /tmp/config_review_result.json | jq -r '.verdict // "PASS"')
