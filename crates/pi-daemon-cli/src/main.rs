@@ -223,13 +223,13 @@ fn spawn_daemon_process(listen_addr: &str) -> anyhow::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
-        cmd.pre_exec(|| {
-            // Create new session to detach from terminal
-            unsafe {
+        unsafe {
+            cmd.pre_exec(|| {
+                // Create new session to detach from terminal
                 libc::setsid();
-            }
-            Ok(())
-        });
+                Ok(())
+            });
+        }
     }
 
     let child = cmd

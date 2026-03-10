@@ -1,5 +1,7 @@
 //! Integration tests for daemon background functionality
 
+#![allow(deprecated)] // Allow deprecated Command::cargo_bin for testing
+
 use assert_cmd::Command;
 use predicates::prelude::*;
 use serial_test::serial;
