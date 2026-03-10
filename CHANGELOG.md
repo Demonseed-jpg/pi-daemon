@@ -17,7 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Fix LLM inline comments failing with "Line could not be resolved" errors (#172)
   - Filter inline comments to only reference lines that exist in the diff
-  - Move unmappable line references to "File-level feedback" section in review body  
+  - Move unmappable line references to "File-level feedback" section in review body
+- Fix LLM response JSON truncation in code reviews (#174)
+  - Increased token limits from 4096 to 8192 for all review types
+  - Added response validation before saving to prevent invalid JSON
+  - Added fallback handling for truncated responses with partial summary extraction  
   - Prevents GitHub API 422 errors when LLM references unchanged lines
   - Applies to architectural, test quality, and configuration reviews
 - Fix LLM code review comments not posted before job failure (#166)

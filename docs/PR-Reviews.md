@@ -10,7 +10,7 @@ Checks fall into three categories:
 
 - **Inline Annotation + Step Summary** — Posts `::error file=` / `::warning file=` annotations that appear on the offending line in the "Files changed" tab, with full detail in `$GITHUB_STEP_SUMMARY`. Used for security/hygiene findings that reference specific files (#141).
 - **Commit Status** — Posts a status badge in the merge box via `repos.createCommitStatus()`. Used for metrics (coverage, binary size) (#140).
-- **Native PR Review** — Posts a native `pulls.createReview()` with inline annotations. Used for LLM code reviews (#139).
+- **Native PR Review** — Posts a native `pulls.createReview()` with inline annotations. Used for LLM code reviews (#139). Includes response validation and fallback handling for truncated responses (#174).
 - **Native Check Only** — Creates a GitHub status check. Output is in the Actions logs. Used when the failure is self-explanatory (standard tooling output).
 
 ## All Checks by Category
