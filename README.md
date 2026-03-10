@@ -15,6 +15,31 @@ Pi stays as the interactive TUI coding agent. pi-daemon runs as a background ser
 - **Hands** — Autonomous capability packages that work for you on schedules
 - **Wire Protocol** — Agent-to-agent P2P networking
 
+## Configuration
+
+### Network Access
+
+By default, pi-daemon binds to `0.0.0.0:4200` for network access from mobile devices and other machines on your network.
+
+**Security Note**: This allows any device on your network to access the daemon. For localhost-only access, set:
+
+```bash
+export PI_DAEMON_LISTEN_ADDR="127.0.0.1:4200"
+```
+
+Or edit `~/.pi-daemon/config.toml`:
+```toml
+listen_addr = "127.0.0.1:4200"
+```
+
+### Environment Variables
+
+- `PI_DAEMON_LISTEN_ADDR` — Override listen address (default: `0.0.0.0:4200`)
+- `PI_DAEMON_API_KEY` — Set API key for authentication
+- `ANTHROPIC_API_KEY` — Anthropic API key
+- `OPENAI_API_KEY` — OpenAI API key
+- `GITHUB_TOKEN` — GitHub Personal Access Token
+
 ## Status
 
 🚧 Under construction. See [Issues](../../issues) for the phased build plan.
