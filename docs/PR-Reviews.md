@@ -123,11 +123,26 @@ When both structural and semantic checks run, a single PR comment is posted:
 | **Template Sync** | template-sync.yml | ❌ | ❌ | Validates PR template structure matches current crates/workflows. Runs on push to main + weekly cron. |
 | **Local Test Evidence** | Custom script | ⚠️ | ❌ | Warns if PR description lacks evidence of local `scripts/test-local.sh` execution or crate checkboxes. |
 
+### 🔬 Scope Gate
+
+| Check | Tool | Blocking | Comment | Description |
+|-------|------|:--------:|:-------:|-------------|
+| **Scope Gate** | `scripts/scope-gate.sh` | ✅ | ✅ | Mechanical PR scope check. Pure bash, no LLM, <15 seconds. See `scope-gate.yml`. |
+
+The Scope Gate evaluates whether a PR is focused enough to review reliably. It runs three checks:
+
+1. **Issue Reference (required):** Every PR must reference an issue (`Closes #N`, `Fixes #N`, `Refs #N`, or `Implements #N`). Missing = blocked.
+2. **Size Thresholds:** >1500 lines → blocked. >800 lines → warning.
+3. **Workstream Cohesion:** Files are categorized into workstreams (`source`, `test-code`, `test-infra`, `ci-workflows`, `docs`, `pr-template`, `scripts`, `other`). `deps` (Cargo.toml/Cargo.lock) and `changelog` are always expected and not counted. `source` + `test-code` always count as one workstream (tests belong with their source per Google eng-practices). 4+ workstreams → blocked. 3 workstreams at 500+ lines → warning.
+
+On block/warn, a PR comment is posted with the workstream breakdown and guidance on how to split. On pass, no comment (no clutter). If a previously-blocked PR is fixed and now passes, the stale comment is deleted.
+
+**Architecture:** The logic lives in `scripts/scope-gate.sh` — a standalone bash script testable locally via `scripts/test-scope-gate.sh` (27 test cases). The workflow (`scope-gate.yml`) is a thin wrapper that gathers PR metadata and calls the script.
+
 ### 🧹 PR Hygiene
 
 | Check | Tool | Blocking | Comment | Description |
 |-------|------|:--------:|:-------:|-------------|
-| **PR Size** | gh pr diff --stat | ⚠️ | ✅ | <400 lines: silent. 400–800: info. 800+: warning. 1500+: strong warning. Never blocking. |
 | **Commit Message Lint** | Custom regex | ⚠️ | ❌ | Conventional Commits format: `feat:`, `fix:`, `docs:`, `test:`, `ci:`, `refactor:`, `chore:`. |
 | **PR Description** | Custom script | ⚠️ | ❌ | Verifies PR body isn't empty and references an issue. |
 

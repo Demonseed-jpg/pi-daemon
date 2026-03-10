@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Scope Gate Phase 1 workflow (`.github/workflows/scope-gate.yml`) — mechanical PR size + workstream checks (#119)
+- `scripts/scope-gate.sh` — standalone scope gate logic with 3 checks: issue reference, size thresholds, workstream cohesion (#119)
+- `scripts/test-scope-gate.sh` — 27 test cases for scope gate covering all thresholds and edge cases (#119)
+
+### Changed
+- PR size check removed from `pr-hygiene.yml` and consolidated into scope gate (#119)
+
+### Previously Added
 - `FullTestServer` in test-utils — centralized API test server replacing duplicated boilerplate (#116)
 - Enhanced `TestClient` with `put_json`, `patch_json`, `post_raw`, `get_concurrent`, `post_json_expect` methods (#116)
 - New assertion macros: `assert_header!`, `assert_json_contains!`, `assert_openai_completion!`, `assert_events_contain!` (#116)
