@@ -145,11 +145,11 @@ jobs:
                     "**Files in this PR:** Configuration files, documentation, or generated files only."
             });
             
-            // Create neutral skip check
+            // Create neutral skip check (different name to avoid duplicates)
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Architectural Review',
+              name: 'Architectural Review (Skipped)',
               head_sha: context.payload.pull_request.head.sha,
               status: 'completed',
               conclusion: 'neutral',
@@ -295,11 +295,11 @@ jobs:
                     "**Files in this PR:** Source code, configuration, or documentation files only."
             });
             
-            // Create neutral skip check
+            // Create neutral skip check (different name to avoid duplicates)
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Test Quality Review',
+              name: 'Test Quality Review (Skipped)',
               head_sha: context.payload.pull_request.head.sha,
               status: 'completed',
               conclusion: 'neutral',
@@ -445,11 +445,11 @@ jobs:
                     "**Files in this PR:** Source code or test files only."
             });
             
-            // Create neutral skip check
+            // Create neutral skip check (different name to avoid duplicates)
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Configuration Review',
+              name: 'Configuration Review (Skipped)',
               head_sha: context.payload.pull_request.head.sha,
               status: 'completed',
               conclusion: 'neutral',
