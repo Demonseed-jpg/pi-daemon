@@ -6,9 +6,11 @@ For the full rationale and design decisions, see [Issue #28](https://github.com/
 
 ## Overview
 
-Checks fall into two categories:
+Checks fall into three categories:
 
-- **Comment + Native Check** — Posts a PR comment with detailed analysis AND creates a GitHub status check. Used when the output is dynamic and the developer needs context to act.
+- **Inline Annotation + Step Summary** — Posts `::error file=` / `::warning file=` annotations that appear on the offending line in the "Files changed" tab, with full detail in `$GITHUB_STEP_SUMMARY`. Used for security/hygiene findings that reference specific files (#141).
+- **Commit Status** — Posts a status badge in the merge box via `repos.createCommitStatus()`. Used for metrics (coverage, binary size) (#140).
+- **Native PR Review** — Posts a native `pulls.createReview()` with inline annotations. Used for LLM code reviews (#139).
 - **Native Check Only** — Creates a GitHub status check. Output is in the Actions logs. Used when the failure is self-explanatory (standard tooling output).
 
 ## All Checks by Category
@@ -17,9 +19,9 @@ Checks fall into two categories:
 
 | Check | Tool | Blocking | Comment | Description |
 |-------|------|:--------:|:-------:|-------------|
-| **Secrets Scan** | TruffleHog | ✅ | ✅ | Scans full diff for leaked API keys, tokens, passwords, private keys. Runs via `_security.yml`. |
-| **Hardcoded Credentials** | gitleaks / custom grep | ✅ | ✅ | Regex patterns for `sk-ant-`, `ghp_`, `Bearer `, `password = "`, etc. Runs via `_security.yml`. |
-| **Commit Message Secrets** | Custom script | ✅ | ✅ | Scans all PR commit messages for secret patterns and env dumps. Runs via `_hygiene.yml`. |
+| **Secrets Scan** | TruffleHog | ✅ | ❌ | Scans full diff for leaked API keys, tokens, passwords, private keys. Inline `::error file=` annotations + step summary. Runs via `_security.yml`. |
+| **Hardcoded Credentials** | custom grep | ✅ | ❌ | Regex patterns for `sk-ant-`, `ghp_`, etc. Inline `::error file=,line=` annotations on changed files + step summary. Runs via `_security.yml`. |
+| **Commit Message Secrets** | Custom script | ✅ | ❌ | Scans all PR commit messages for secret patterns and env dumps. `::error` annotations (no file context) + step summary. Runs via `_hygiene.yml`. |
 | **SSRF / Private IP** | Custom grep | ⚠️ | ❌ | Scans for hardcoded private IPs, cloud metadata URLs, or localhost in non-test code. Advisory only — some localhost refs are intentional. |
 
 ### 📦 Supply Chain & Dependencies
@@ -30,7 +32,7 @@ Checks fall into two categories:
 | **Unused Dependencies** | cargo-machete | ⚠️ | ✅ | Detects deps in Cargo.toml that are never used in code. Warning only — false positives with proc macros. |
 | **Outdated Dependencies** | cargo outdated / Dependabot | ❌ | ❌ | Reports deps with newer versions. Advisory only. |
 | **Security Audit** | cargo-audit | ✅ | ❌ | Checks deps against RustSec advisory database. Runs via `_security.yml`. |
-| **npm Security Audit** | npm audit / yarn audit | ✅ | ✅ | Checks JavaScript/TypeScript dependencies for known vulnerabilities. Runs via `_security.yml`. |
+| **npm Security Audit** | npm audit / yarn audit | ✅ | ❌ | Checks JavaScript/TypeScript dependencies for known vulnerabilities. `::warning` annotation + step summary (no file context). Runs via `_security.yml`. |
 
 ### 🔍 Code Quality & Correctness
 
@@ -71,7 +73,7 @@ Implemented as a **hybrid Documentation Architecture Validator** — a single wo
 
 | Check | Tool | Blocking | Comment | Description |
 |-------|------|:--------:|:-------:|-------------|
-| **Sidebar ↔ Files Sync** | Custom bash | ✅ | ✅ | Every `.md` in `docs/` (excluding `_`-prefixed) must be in `_Sidebar.md`, and every sidebar entry must have a corresponding file. Catches orphaned pages and dangling sidebar links. |
+| **Sidebar ↔ Files Sync** | Custom bash | ✅ | ❌ | Every `.md` in `docs/` (excluding `_`-prefixed) must be in `_Sidebar.md`, and every sidebar entry must have a corresponding file. `::warning file=` annotations + step summary. Catches orphaned pages and dangling sidebar links. |
 | **Crate ↔ Architecture Sync** | Custom script | ⚠️ | ✅ | Parses `Cargo.toml` workspace members, verifies each crate appears in `Architecture.md`. Catches "added a crate but forgot to document it." |
 | **Internal Link Validation** | lychee | ⚠️ | ❌ | Validates all `[[Wiki-Links]]` and `[text](relative/path.md)` links resolve to real files. |
 | **Heading Structure Lint** | markdownlint | ⚠️ | ❌ | Consistent heading hierarchy: every page starts with `# Title`, uses `##` for sections, no level skipping. Config: `.markdownlint.json`. |
@@ -255,12 +257,12 @@ Test jobs run as a reusable workflow (`_test.yml`) called by the PR Pipeline orc
 
 | Check | Tool | Blocking | Comment | Description |
 |-------|------|:--------:|:-------:|-------------|
-| **Secrets Scan** | TruffleHog | ✅ | ✅ | Scans for leaked API keys, tokens, passwords. |
-| **Credential Patterns** | Custom grep | ✅ | ✅ | Regex patterns for `sk-ant-`, `ghp_`, etc. |
+| **Secrets Scan** | TruffleHog | ✅ | ❌ | Scans for leaked API keys, tokens, passwords. Inline `::error file=` annotations + step summary. |
+| **Credential Patterns** | Custom grep | ✅ | ❌ | Regex patterns for `sk-ant-`, `ghp_`, etc. Inline `::error file=,line=` annotations + step summary. |
 | **License Compliance** | cargo-deny | ✅ | ✅ | Approved licenses only. Config: `deny.toml`. |
 | **Unsafe Code** | grep | ✅ | ✅ | pi-daemon must be 100% safe Rust. |
 | **Security Audit** | cargo-audit | ✅ | ❌ | Checks deps against RustSec advisory DB. |
-| **npm Audit** | npm/yarn audit | ✅ | ✅ | JS/TS dependency vulnerabilities. |
+| **npm Audit** | npm/yarn audit | ✅ | ❌ | JS/TS dependency vulnerabilities. `::warning` annotation + step summary. |
 
 Security checks run as a reusable workflow (`_security.yml`) called by the PR Pipeline orchestrator. Security runs in parallel with lint after scope gate passes (`needs: [scope-gate]` in orchestrator).
 
@@ -272,8 +274,8 @@ All hygiene checks run as a reusable workflow (`_hygiene.yml`) called by the PR 
 |-------|------|:--------:|:-------:|-------------|
 | **Commit Message Lint** | Custom regex | ⚠️ | ❌ | Conventional Commits format: `feat:`, `fix:`, `docs:`, `test:`, `ci:`, `refactor:`, `chore:`. Runs via `_hygiene.yml`. |
 | **PR Description** | Custom script | ⚠️ | ❌ | Verifies PR body isn't empty and references an issue. Runs via `_hygiene.yml`. |
-| **Commit Message Secrets** | Custom script | ✅ | ✅ | Scans commit messages for secret patterns and env dumps. Runs via `_hygiene.yml`. |
-| **Sidebar Sync** | Custom bash | ✅ | ✅ | Verifies `docs/_Sidebar.md` matches `docs/*.md` files. Runs via `_hygiene.yml`. |
+| **Commit Message Secrets** | Custom script | ✅ | ❌ | Scans commit messages for secret patterns and env dumps. `::error` annotations + step summary. Runs via `_hygiene.yml`. |
+| **Sidebar Sync** | Custom bash | ✅ | ❌ | Verifies `docs/_Sidebar.md` matches `docs/*.md` files. `::warning file=` annotations + step summary. Runs via `_hygiene.yml`. |
 | **Markdown Lint** | markdownlint | ⚠️ | ❌ | Heading structure, formatting. Runs via `_hygiene.yml`. |
 | **Link Check** | lychee | ⚠️ | ❌ | Validates links in markdown files. Runs via `_hygiene.yml`. |
 | **Unused Dependencies** | cargo-machete | ⚠️ | ✅ | Detects deps never used in code. Warning only. Runs via `_hygiene.yml`. |
@@ -454,6 +456,30 @@ Coverage and binary size metrics are posted as **commit statuses** rather than P
 **Legacy cleanup:** On first run after migration, any existing `📊 Code Coverage` or `📏 Binary Size` PR comments are automatically deleted to prevent stale metric comments from lingering alongside the new status badges.
 
 **Agent experience:** Agents call `repos.listCommitStatusesForRef()` and read structured `{ context: "coverage", description: "72.3% overall", state: "success" }` — no markdown parsing needed.
+
+---
+
+## 🔔 Security & Hygiene Annotations (#141)
+
+Security and hygiene findings are posted as **workflow command annotations** (`::error` / `::warning`) rather than PR comments. Annotations appear inline in the "Files changed" tab on the offending line and in the "Annotations" section of the Actions run summary.
+
+**Annotation mapping:**
+
+| Finding | Annotation | File context | Detail |
+|---------|-----------|:------------:|--------|
+| TruffleHog secrets | `::error file=X,line=Y::...` | ✅ | Inline on the file containing the secret |
+| Credential patterns | `::error file=X,line=Y::...` | ✅ | Inline on the file containing the pattern |
+| npm audit vulnerabilities | `::warning::...` | ❌ | Annotations section only (advisories don't map to source lines) |
+| Commit message secrets | `::error::...` | ❌ | Annotations section only (commit messages aren't files) |
+| Sidebar sync mismatches | `::warning file=X::...` | ✅ | Inline on orphaned doc page and/or `_Sidebar.md` |
+
+**Annotation limits:** GitHub limits annotations to 10 per step and 50 per job. When findings exceed 10, the first 10 are posted as inline annotations and the remainder are aggregated in `$GITHUB_STEP_SUMMARY` with a total count.
+
+**Blocking behavior:** All security findings still fail the job via `exit 1`. The annotation + red X combination is stronger than a PR comment — the merge box shows a failure and the annotation explains exactly where and why.
+
+**Agent experience:** Agents call `checks.listAnnotations()` on the check run and get structured `{ path: "src/config.rs", start_line: 42, annotation_level: "failure", message: "..." }`. No markdown comment parsing needed.
+
+**Human experience:** Red/yellow inline annotations appear directly on the offending line in the "Files changed" tab. Impossible to miss during code review, unlike PR comments that can be scrolled past.
 
 ---
 

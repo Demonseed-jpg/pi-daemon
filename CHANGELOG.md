@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- PR Output Layer Phase 3: Convert security and hygiene warnings to inline file annotations (#141)
+  - Secrets Scan (`_security.yml`): TruffleHog findings posted as `::error file=X,line=Y` annotations (up to 10 inline, overflow to step summary)
+  - Credential Patterns (`_security.yml`): Hardcoded credential findings posted as `::error file=X,line=Y` annotations with actual file/line context from changed files
+  - npm Security Audit (`_security.yml`): Vulnerability findings posted as `::warning` annotation + `$GITHUB_STEP_SUMMARY` (no file context — advisory-level findings)
+  - Commit Message Secrets (`_hygiene.yml`): Secret patterns posted as `::error` annotations without file context (commit messages are not files)
+  - Sidebar Sync (`_hygiene.yml`): Mismatches posted as `::warning file=X` annotations on orphaned doc pages and `_Sidebar.md`
+  - All 5 `issues.createComment()` / `issues.updateComment()` upsert sites removed
+  - Annotation overflow handled: first 10 findings inline, remaining aggregated in `$GITHUB_STEP_SUMMARY`
+  - Blocking behavior preserved (`exit 1` on security failures)
+  - `pull-requests: write` permission removed from `_hygiene.yml` (no longer needed — annotations use workflow commands, not API calls)
+  - No permissions changes needed for `_security.yml` (annotations are workflow commands)
 - PR Output Layer Phase 2: Convert metrics (coverage, binary size) to commit statuses (#140)
   - Coverage metric (`_test.yml`) now posts `repos.createCommitStatus()` with context `coverage` instead of a PR comment
   - Binary size metric (`_build.yml`) now posts `repos.createCommitStatus()` with context `binary-size` instead of a PR comment
