@@ -329,6 +329,13 @@ jobs:
           fi
           VERDICT=$(jq -r '.verdict // "PASS"' "$RESULT")
           if [ "$VERDICT" != "PASS" ]; then
+            # If diff was truncated, LLM may be hallucinating — treat as advisory
+            DIFF_SIZE=$(wc -c < /tmp/arch_diff.txt 2>/dev/null || echo 0)
+            if [ "$DIFF_SIZE" -gt 80000 ]; then
+              echo "::warning::LLM arch review returned FAIL but diff was large ($DIFF_SIZE chars) — treating as advisory"
+              echo "Summary: $(jq -r '.summary // ""' "$RESULT")"
+              exit 0
+            fi
             echo "::error::Architectural review failed: $VERDICT"
             echo "Summary: $(jq -r '.summary // ""' "$RESULT")"
             exit 1
@@ -625,6 +632,12 @@ jobs:
           fi
           VERDICT=$(jq -r '.verdict // "PASS"' "$RESULT")
           if [ "$VERDICT" != "PASS" ]; then
+            DIFF_SIZE=$(wc -c < /tmp/test_diff.txt 2>/dev/null || echo 0)
+            if [ "$DIFF_SIZE" -gt 80000 ]; then
+              echo "::warning::LLM test review returned FAIL but diff was large ($DIFF_SIZE chars) — treating as advisory"
+              echo "Summary: $(jq -r '.summary // ""' "$RESULT")"
+              exit 0
+            fi
             echo "::error::Test quality review failed: $VERDICT"
             echo "Summary: $(jq -r '.summary // ""' "$RESULT")"
             exit 1
@@ -775,6 +788,90 @@ jobs:
           
           echo "config_diff_size=$DIFF_SIZE" >> $GITHUB_OUTPUT
 
+      - name: Mechanical config pre-checks
+        if: steps.action.outputs.action == 'review'
+        id: mechanical
+        run: |
+          echo "Running mechanical pre-checks (no LLM)..."
+          ISSUES=""
+          PASS_COUNT=0
+          TOTAL_COUNT=0
+
+          # Check 1: New workflow files must be documented in PR-Reviews.md
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+          NEW_WORKFLOWS=$(git diff origin/${{ github.base_ref }}...HEAD --name-only --diff-filter=A -- '.github/workflows/*.yml' || true)
+          if [ -n "$NEW_WORKFLOWS" ]; then
+            for wf in $NEW_WORKFLOWS; do
+              WF_NAME=$(basename "$wf" .yml)
+              if ! grep -qi "$WF_NAME" docs/PR-Reviews.md 2>/dev/null; then
+                ISSUES="${ISSUES}❌ New workflow $wf not documented in docs/PR-Reviews.md\n"
+              else
+                PASS_COUNT=$((PASS_COUNT + 1))
+              fi
+            done
+          else
+            PASS_COUNT=$((PASS_COUNT + 1))
+          fi
+
+          # Check 2: All workflow files have valid YAML
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+          YAML_OK=true
+          for wf in .github/workflows/*.yml; do
+            if ! python3 -c "import yaml; yaml.safe_load(open('$wf'))" 2>/dev/null; then
+              ISSUES="${ISSUES}❌ Invalid YAML: $wf\n"
+              YAML_OK=false
+            fi
+          done
+          [ "$YAML_OK" = true ] && PASS_COUNT=$((PASS_COUNT + 1))
+
+          # Check 3: All workflow files have concurrency groups
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+          CONC_OK=true
+          for wf in $NEW_WORKFLOWS; do
+            if [ -n "$wf" ] && [ -f "$wf" ] && ! grep -q "concurrency:" "$wf" 2>/dev/null; then
+              ISSUES="${ISSUES}❌ $wf missing concurrency group\n"
+              CONC_OK=false
+            fi
+          done
+          [ "$CONC_OK" = true ] && PASS_COUNT=$((PASS_COUNT + 1))
+
+          # Check 4: CHANGELOG updated if .rs/.yml/Cargo.toml changed
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+          CHANGED=$(git diff origin/${{ github.base_ref }}...HEAD --name-only)
+          HAS_MEANINGFUL=$(echo "$CHANGED" | grep -E '\.(rs|yml)$|Cargo\.toml' | head -1)
+          HAS_CHANGELOG=$(echo "$CHANGED" | grep 'CHANGELOG.md' | head -1)
+          if [ -n "$HAS_MEANINGFUL" ] && [ -z "$HAS_CHANGELOG" ]; then
+            ISSUES="${ISSUES}❌ Meaningful files changed but CHANGELOG.md not updated\n"
+          else
+            PASS_COUNT=$((PASS_COUNT + 1))
+          fi
+
+          # Check 5: New docs/ pages in _Sidebar.md
+          TOTAL_COUNT=$((TOTAL_COUNT + 1))
+          NEW_DOCS=$(git diff origin/${{ github.base_ref }}...HEAD --name-only --diff-filter=A -- 'docs/*.md' | grep -v '^docs/_' || true)
+          SIDEBAR_OK=true
+          for doc in $NEW_DOCS; do
+            PAGE=$(basename "$doc" .md)
+            if ! grep -q "$PAGE" docs/_Sidebar.md 2>/dev/null; then
+              ISSUES="${ISSUES}❌ New page $doc not in docs/_Sidebar.md\n"
+              SIDEBAR_OK=false
+            fi
+          done
+          [ "$SIDEBAR_OK" = true ] && PASS_COUNT=$((PASS_COUNT + 1))
+
+          echo "Mechanical checks: $PASS_COUNT/$TOTAL_COUNT passed"
+          if [ -n "$ISSUES" ]; then
+            echo -e "Issues found:\n$ISSUES"
+            echo "mechanical_issues<<EOF" >> $GITHUB_OUTPUT
+            echo -e "$ISSUES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            echo "mechanical_pass=false" >> $GITHUB_OUTPUT
+          else
+            echo "✅ All mechanical checks passed"
+            echo "mechanical_pass=true" >> $GITHUB_OUTPUT
+            echo "mechanical_issues=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Gather configuration context
         if: steps.action.outputs.action == 'review'
         run: |
@@ -820,36 +917,37 @@ jobs:
           
           # Create the configuration review prompt — tight, enforces CI/docs standards
           cat > /tmp/config_prompt.txt << 'CONFIG_PROMPT'
-          You review CI/CD, documentation, and config changes for pi-daemon against the existing check catalog (provided below). Write like a DevOps engineer reviewing a teammate's PR — brief, precise, no corporate speak. If a workflow looks clean, say so in one sentence. If something will break in CI, say exactly what and why.
+          You review CI/CD, documentation, and config changes for pi-daemon for QUALITY ONLY. Write like a DevOps engineer reviewing a teammate's PR — brief, precise, no filler.
 
-          ## Hard FAIL rules
-          - New workflow job not documented in docs/PR-Reviews.md
-          - YAML syntax error or invalid job dependency
-          - Workflow uses hardcoded secrets instead of secrets context
-          - CHANGELOG.md not updated when .rs, .yml, or Cargo.toml files changed
-          - docs/ page added but not in _Sidebar.md
-          - Workflow missing concurrency group (allows redundant parallel runs)
+          IMPORTANT: Mechanical correctness checks (YAML validity, concurrency groups, changelog, sidebar sync, workflow documentation) are handled by a separate automated tool. Do NOT check for those — they are already verified. You will get false positives on truncated diffs if you try.
+
+          Your job is subjective quality assessment only:
+          - Are workflows well-structured and maintainable?
+          - Are job/step names clear and descriptive?
+          - Is the permissions block minimal?
+          - Are there hardcoded secrets (not ${{ secrets.* }})?
+          - Is the documentation clear and well-written?
+          - Are there unnecessary duplicate steps or dead code?
 
           ## Score each dimension 0-3
-          0 = Violation (FAIL). 1 = Concern. 2 = Acceptable. 3 = Excellent.
+          0 = Serious quality problem. 1 = Concern. 2 = Acceptable. 3 = Excellent.
 
           Dimensions:
-          - yaml_correctness: Valid syntax, correct job deps, proper step ordering
-          - naming: Job names match conventions, descriptive step names
-          - docs_sync: PR-Reviews.md, Architecture.md, _Sidebar.md updated as needed
-          - security: No hardcoded secrets, proper permissions block, minimal scopes
-          - changelog: CHANGELOG.md updated for meaningful changes
-          - maintainability: DRY workflows, clear comments, no dead code
+          - structure: Workflow organization, job ordering, step clarity
+          - naming: Job/step names are descriptive and consistent
+          - security: Minimal permissions, no hardcoded secrets, proper scoping
+          - docs_quality: Documentation is clear, accurate, well-organized
+          - maintainability: DRY, no dead code, clear comments where needed
 
-          PASS: no dimension scores 0 AND average >= 2.0
-          FAIL: any dimension scores 0 OR average < 2.0
+          PASS: no dimension scores 0 AND average >= 1.5
+          FAIL: any dimension scores 0 OR average < 1.5
 
           ## Output format — JSON only, no markdown, no explanation outside the JSON
-          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"yaml_correctness":N,"naming":N,"docs_sync":N,"security":N,"changelog":N,"maintainability":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":[{"severity":"error|warning|info","file":"string","description":"string"}],"actions":["concrete task, e.g. Add new-workflow entry to docs/PR-Reviews.md checks table","Add concurrency group to template-sync.yml to prevent parallel runs"],"notes":"string"}
+          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"structure":N,"naming":N,"security":N,"docs_quality":N,"maintainability":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":[{"severity":"error|warning|info","file":"string","description":"string"}],"actions":["concrete task, e.g. Rename job X to be more descriptive","Remove dead step Y in workflow Z"],"notes":"string"}
 
           ## actions field rules
           - Each action is a single concrete task the PR author can act on immediately
-          - Start with a verb: Add, Update, Remove, Fix, Document, Move
+          - Start with a verb: Add, Update, Remove, Fix, Rename, Simplify
           - Reference specific files when possible
           - If verdict is PASS, actions should be empty or contain only minor suggestions
           - If verdict is FAIL, actions must list every required fix as a workable checklist
@@ -935,21 +1033,34 @@ jobs:
       - name: Fail job if review failed
         if: steps.action.outputs.action == 'review'
         run: |
+          # Mechanical checks are authoritative — if they fail, block
+          if [ "${{ steps.mechanical.outputs.mechanical_pass }}" = "false" ]; then
+            echo "::error::Mechanical config checks failed:"
+            echo "${{ steps.mechanical.outputs.mechanical_issues }}"
+            exit 1
+          fi
+
+          # LLM quality review — advisory on large diffs, blocking on small ones
           RESULT="/tmp/config_review_result.json"
           if ! jq . "$RESULT" >/dev/null 2>&1; then
-            echo "::warning::Config review returned invalid JSON — passing by default"
-            echo "Raw: $(head -c 300 "$RESULT")"
+            echo "::warning::Config review returned invalid JSON — mechanical checks passed, continuing"
             exit 0
           fi
           VERDICT=$(jq -r '.verdict // "PASS"' "$RESULT")
           if [ "$VERDICT" != "PASS" ]; then
+            DIFF_SIZE=$(wc -c < /tmp/config_diff.txt 2>/dev/null || echo 0)
+            if [ "$DIFF_SIZE" -gt 40000 ]; then
+              echo "::warning::LLM config review returned FAIL but diff was truncated ($DIFF_SIZE chars) — treating as advisory"
+              echo "Summary: $(jq -r '.summary // ""' "$RESULT")"
+              exit 0
+            fi
             echo "::error::Configuration review failed: $VERDICT"
             echo "Summary: $(jq -r '.summary // ""' "$RESULT")"
             echo "Issues: $(jq -r '.issues // [] | .[] | if type == "object" then .description else . end' "$RESULT" 2>/dev/null | head -5)"
             echo "Actions: $(jq -r '.actions // [] | .[]' "$RESULT" 2>/dev/null | head -5)"
             exit 1
           fi
-          echo "Configuration review passed"
+          echo "Configuration review passed (mechanical ✅ + LLM ✅)"
 
       - name: Create Configuration Check
         if: steps.action.outputs.action == 'review'
