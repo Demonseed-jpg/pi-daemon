@@ -71,20 +71,73 @@ cargo fmt --all -- --check
 
 The `pi-daemon-test-utils` crate provides shared utilities:
 
+### FullTestServer (primary — use this for API tests)
+
 ```rust
-use pi_daemon_test_utils::{test_kernel, test_server, TestClient};
+use pi_daemon_test_utils::FullTestServer;
 
-// Create an isolated kernel with temp directory
-let (kernel, _tmp) = test_kernel();
+// Boot a full API server with real kernel on a random port
+let server = FullTestServer::new().await;
+let client = server.client();
 
-// Boot an ephemeral API server on random port
-let (base_url, state) = test_server().await;
-
-// HTTP client with assertion helpers
-let client = TestClient::new(&base_url);
 let resp = client.get("/api/health").await;
+assert_eq!(resp.status(), 200);
+
+// WebSocket URL helper
+let ws_url = server.ws_url("my-agent");
+
+// Custom config (e.g., for auth tests)
+let server = FullTestServer::with_config(DaemonConfig {
+    api_key: "test-key".to_string(),
+    ..Default::default()
+}).await;
+```
+
+**⚠️ Do NOT duplicate `start_test_server()` in test files.** Use `FullTestServer::new()`.
+
+### TestClient
+
+```rust
+let client = TestClient::new(&base_url);
+
+// Standard methods
+let resp = client.get("/api/health").await;
+let resp = client.post_json("/api/agents", &json!({...})).await;
+let resp = client.delete("/api/agents/id").await;
+let resp = client.put_json("/path", &json!({...})).await;
+let resp = client.patch_json("/path", &json!({...})).await;
+
+// Raw request (for testing malformed input)
+let resp = client.post_raw("/path", "not json", "text/plain").await;
+
+// Concurrent requests
+let responses = client.get_concurrent("/api/status", 50).await;
+
+// POST + assert + parse in one call
+let json = client.post_json_expect("/api/agents", &body, 201).await;
+```
+
+### Assertion Macros
+
+```rust
+use pi_daemon_test_utils::{assert_status, assert_json_ok, assert_header,
+    assert_json_contains, assert_openai_completion, assert_events_contain};
+
 assert_status!(resp, 200);
 let json = assert_json_ok!(resp, "status");
+assert_header!(resp, "content-type", "application/json");
+assert_json_contains!(resp, json!({"status": "ok"}));
+assert_openai_completion!(body);  // Validates full OpenAI response schema
+assert_events_contain!(events, "System", "AgentRegistered");
+```
+
+### TestKernel (for kernel-level tests)
+
+```rust
+use pi_daemon_test_utils::TestKernel;
+
+let kernel = TestKernel::new();
+// kernel.data_dir is an isolated temp directory
 ```
 
 ## Naming Conventions
