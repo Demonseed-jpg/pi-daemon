@@ -139,10 +139,8 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: "## ⏭️ Architectural Review: SKIPPED\n\n" +
-                    "**Reason:** " + skipReason + "\n\n" +
-                    "**Scope:** Architectural review focuses on source code files (.rs, .ts, .js) containing architectural decisions, design patterns, and code structure. This PR contains no source files to review architecturally.\n\n" +
-                    "**Files in this PR:** Configuration files, documentation, or generated files only."
+              body: "## ⏭️ Architectural Review: Skipped\n\n" +
+                    "No source files (.rs, .ts, .js) in this PR — nothing to review architecturally. Looks like a docs/config-only change."
             });
 
       - name: Checkout repo
@@ -193,7 +191,7 @@ jobs:
           
           # Create the architectural review prompt — tight, no fluff
           cat > /tmp/arch_prompt.txt << 'ARCH_PROMPT'
-          You review Rust code for pi-daemon against its architecture docs (provided below). You are strict. You catch real problems and ignore cosmetic ones.
+          You review Rust code for pi-daemon against its architecture docs (provided below). You are strict but fair — you catch real problems and skip cosmetic nitpicks. Write your summary and notes like a senior engineer talking to a peer: direct, specific, no filler. If something is good, say so briefly. If something is wrong, say exactly what and where.
 
           ## Rules
           - FAIL if dependency graph is violated (types→kernel→api→cli, no reverse deps)
@@ -221,7 +219,14 @@ jobs:
           FAIL: any dimension scores 0 OR average < 2.0
 
           ## Output format — JSON only, no markdown, no explanation outside the JSON
-          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"dep_graph":N,"concurrency":N,"errors":N,"testing":N,"naming":N,"security":N,"docs":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":["string"],"notes":"string"}
+          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"dep_graph":N,"concurrency":N,"errors":N,"testing":N,"naming":N,"security":N,"docs":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":["string"],"actions":["concrete task the author should do, e.g. Add integration test for /api/foo endpoint","Move bar.rs from pi-daemon-api to pi-daemon-kernel per dependency graph"],"notes":"string"}
+
+          ## actions field rules
+          - Each action is a single concrete task the PR author can act on immediately
+          - Start with a verb: Add, Move, Remove, Rename, Replace, Update, Fix, Test
+          - Reference specific files, functions, or lines when possible
+          - If verdict is PASS, actions should be empty or contain only minor suggestions
+          - If verdict is FAIL, actions must list every required fix — the author should be able to work through them like a checklist
           ARCH_PROMPT
 
           # Prepare the input (architecture context + diff)
@@ -252,7 +257,7 @@ jobs:
                   {"name": "Size Check", "status": "warning", "detail": ("Diff size " + $size + " bytes exceeds LLM limit")}
                 ],
                 "issues": ["Diff too large for automated LLM analysis — manual architectural review recommended"],
-                "notes": "Intelligent file filtering active. Large diff required fallback to size-based review.",
+                "notes": "Diff too large for the LLM. Passed by default — please eyeball it yourself.",
                 "checklist_verdict": "PASS",
                 "expert_verdict": "PASS"
               }' > /tmp/arch_review_result.json
@@ -298,7 +303,7 @@ jobs:
                     {"name": "LLM Analysis", "status": "warning", "detail": "OpenRouter API returned empty response"}
                   ],
                   "issues": ["LLM architectural analysis unavailable — manual review recommended"],
-                  "notes": "Intelligent file filtering active. LLM fallback due to API issue.",
+                  "notes": "LLM API hiccup. Passed by default — give it a human look.",
                   "checklist_verdict": "PASS",
                   "expert_verdict": "PASS"
                 }' > /tmp/arch_review_result.json
@@ -335,38 +340,64 @@ jobs:
               const raw = fs.readFileSync('/tmp/arch_review_result.json', 'utf8');
               review = JSON.parse(raw);
             } catch (e) {
-              review = {
-                verdict: 'PASS',
-                summary: 'Architectural review completed',
-                checks: [],
-                issues: [],
-                notes: 'File classification successful.'
-              };
+              review = { verdict: 'PASS', summary: 'Parse error — defaulting to PASS', scores: {}, checks: [], issues: [], notes: '' };
             }
 
             const verdict = review.verdict || 'PASS';
-            const conclusion = verdict === 'PASS' ? 'success' : 'failure';
+            const icon = verdict === 'PASS' ? '✅' : '❌';
             const sourceCount = '${{ needs.classify.outputs.source_count }}';
-            const excludedCount = '${{ needs.classify.outputs.excluded_count }}';
 
-            let summary = `## ${verdict === 'PASS' ? '✅' : '❌'} 🏗️ Architectural Review: ${verdict}\n\n`;
-            summary += `**${review.summary || 'No summary'}**\n\n`;
-            summary += `### 📁 File Classification (Intelligent Filtering)\n`;
-            summary += `**Reviewed:** ${sourceCount} source files (.rs, .ts, .js)\n`;
-            summary += `**Excluded:** ${excludedCount} generated files (package-lock.json, etc.)\n\n`;
-            summary += `### ✅ Enhanced Review System Active\n`;
-            summary += `Intelligent file filtering and dual-layer review framework ready.\n`;
-            
+            // Build scores table
+            const scores = review.scores || {};
+            const scoreRows = Object.entries(scores)
+              .map(([dim, score]) => {
+                const s = Number(score);
+                const si = s === 0 ? '🔴' : s === 1 ? '🟡' : s === 2 ? '✅' : '🟢';
+                return `| ${si} ${s}/3 | ${dim} |`;
+              }).join('\n');
+
+            // Build checks table
+            const checksRows = (review.checks || [])
+              .map(c => {
+                const ci = c.status === 'pass' ? '✅' : c.status === 'fail' ? '❌' : '⚠️';
+                return `| ${ci} | ${c.name} | ${c.detail || ''} |`;
+              }).join('\n');
+
+            // Build issues list
+            const issuesList = (review.issues || [])
+              .filter(i => i && i.length > 0)
+              .map(i => `- ${i}`)
+              .join('\n');
+
+            let body = `## ${icon} 🏗️ Architectural Review: ${verdict}\n\n`;
+            body += `Looked at ${sourceCount} source file${sourceCount === '1' ? '' : 's'}. `;
+            body += `${review.summary || 'No issues found.'}\n\n`;
+
+            if (scoreRows) {
+              body += `### How it scored\n| Score | What I checked |\n|-------|---------------|\n${scoreRows}\n\n`;
+            }
+            if (checksRows) {
+              body += `### Details\n| | Check | What I found |\n|--|-------|-------------|\n${checksRows}\n\n`;
+            }
+            if (issuesList) {
+              body += `### Things to fix\n${issuesList}\n\n`;
+            }
+            const archActions = (review.actions || [])
+              .filter(a => a && a.length > 0)
+              .map((a, i) => `${i + 1}. ${a}`)
+              .join('\n');
+            if (archActions) {
+              body += `### Recommended actions\n${archActions}\n\n`;
+            }
             if (review.notes) {
-              summary += `\n**Notes:** ${review.notes}\n`;
+              body += `### Other thoughts\n${review.notes}\n`;
             }
 
-            // Post detailed review as PR comment (job status provides pass/fail)
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: summary
+              body
             });
 
   # ─── Test Quality Review ────────────────────────────────
@@ -399,10 +430,8 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: "## ⏭️ Test Quality Review: SKIPPED\n\n" +
-                    "**Reason:** " + skipReason + "\n\n" +
-                    "**Scope:** Test quality review focuses on test files (test*.rs, *_test.go, *.test.ts, spec/) to analyze testing patterns, coverage quality, and test maintainability. This PR contains no test file changes to review.\n\n" +
-                    "**Files in this PR:** Source code, configuration, or documentation files only."
+              body: "## ⏭️ Test Quality Review: Skipped\n\n" +
+                    "No test files changed in this PR. If you added source code without tests, that's worth a second look."
             });
 
       - name: Checkout repo
@@ -453,7 +482,7 @@ jobs:
           
           # Create the test quality review prompt — tight, enforces project standards
           cat > /tmp/test_prompt.txt << 'TEST_PROMPT'
-          You review test code for pi-daemon against the project testing standards (provided below). You enforce the rules strictly.
+          You review test code for pi-daemon against the project testing standards (provided below). You enforce the rules strictly but write like a colleague doing a code review — direct, helpful, specific. Call out what's good in one line. Call out what's wrong with the file and line if possible. No filler sentences.
 
           ## Hard FAIL rules (any one triggers FAIL)
           - Test file contains a manual start_test_server() function instead of FullTestServer::new()
@@ -480,7 +509,14 @@ jobs:
           FAIL: any dimension scores 0 OR average < 2.0
 
           ## Output format — JSON only, no markdown, no explanation outside the JSON
-          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"helpers":N,"naming":N,"error_coverage":N,"edge_cases":N,"isolation":N,"assertions":N,"structure":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":["string"],"notes":"string"}
+          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"helpers":N,"naming":N,"error_coverage":N,"edge_cases":N,"isolation":N,"assertions":N,"structure":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":["string"],"actions":["concrete task, e.g. Replace start_test_server() in api_integration.rs with FullTestServer::new()","Add error path test for /api/agents POST with missing name field"],"notes":"string"}
+
+          ## actions field rules
+          - Each action is a single concrete task the PR author can act on immediately
+          - Start with a verb: Add, Replace, Remove, Rename, Refactor, Test, Fix
+          - Reference specific test files, functions, or patterns when possible
+          - If verdict is PASS, actions should be empty or contain only minor suggestions
+          - If verdict is FAIL, actions must list every required fix as a workable checklist
           TEST_PROMPT
 
           # Prepare the input (test context + diff)
@@ -511,7 +547,7 @@ jobs:
                   {"name": "Size Check", "status": "warning", "detail": ("Diff size " + $size + " bytes exceeds LLM limit")}
                 ],
                 "issues": ["Test diff too large for automated LLM analysis — manual test quality review recommended"],
-                "notes": "Intelligent test file filtering active. Large diff required fallback to size-based review.",
+                "notes": "Test diff too large for the LLM. Passed by default — worth a manual scan.",
                 "checklist_verdict": "PASS",
                 "expert_verdict": "PASS"
               }' > /tmp/test_review_result.json
@@ -557,7 +593,7 @@ jobs:
                     {"name": "LLM Analysis", "status": "warning", "detail": "OpenRouter API returned empty response"}
                   ],
                   "issues": ["LLM test quality analysis unavailable — manual review recommended"],
-                  "notes": "Intelligent test file filtering active. LLM fallback due to API issue.",
+                  "notes": "LLM API hiccup. Passed by default — give the tests a human look.",
                   "checklist_verdict": "PASS",
                   "expert_verdict": "PASS"
                 }' > /tmp/test_review_result.json
@@ -594,38 +630,64 @@ jobs:
               const raw = fs.readFileSync('/tmp/test_review_result.json', 'utf8');
               review = JSON.parse(raw);
             } catch (e) {
-              review = {
-                verdict: 'PASS',
-                summary: 'Test quality review completed',
-                checks: [],
-                issues: [],
-                notes: 'Test file classification successful.'
-              };
+              review = { verdict: 'PASS', summary: 'Parse error — defaulting to PASS', scores: {}, checks: [], issues: [], notes: '' };
             }
 
             const verdict = review.verdict || 'PASS';
-            const conclusion = verdict === 'PASS' ? 'success' : 'failure';
+            const icon = verdict === 'PASS' ? '✅' : '❌';
             const testCount = '${{ needs.classify.outputs.test_count }}';
-            const sourceCount = '${{ needs.classify.outputs.source_count }}';
 
-            let summary = `## ${verdict === 'PASS' ? '✅' : '❌'} 🧪 Test Quality Review: ${verdict}\n\n`;
-            summary += `**${review.summary || 'No summary'}**\n\n`;
-            summary += `### 📁 File Classification (Test Focus)\n`;
-            summary += `**Test Files:** ${testCount} test files reviewed\n`;
-            summary += `**Source Context:** ${sourceCount} source files (for understanding test purpose)\n\n`;
-            summary += `### ✅ Test Quality Framework Active\n`;
-            summary += `Intelligent test file filtering and dual-layer review framework ready.\n`;
-            
+            // Build scores table
+            const scores = review.scores || {};
+            const scoreRows = Object.entries(scores)
+              .map(([dim, score]) => {
+                const s = Number(score);
+                const si = s === 0 ? '🔴' : s === 1 ? '🟡' : s === 2 ? '✅' : '🟢';
+                return `| ${si} ${s}/3 | ${dim} |`;
+              }).join('\n');
+
+            // Build checks table
+            const checksRows = (review.checks || [])
+              .map(c => {
+                const ci = c.status === 'pass' ? '✅' : c.status === 'fail' ? '❌' : '⚠️';
+                return `| ${ci} | ${c.name} | ${c.detail || ''} |`;
+              }).join('\n');
+
+            // Build issues list
+            const issuesList = (review.issues || [])
+              .filter(i => i && i.length > 0)
+              .map(i => `- ${i}`)
+              .join('\n');
+
+            let body = `## ${icon} 🧪 Test Quality Review: ${verdict}\n\n`;
+            body += `Reviewed ${testCount} test file${testCount === '1' ? '' : 's'}. `;
+            body += `${review.summary || 'No issues found.'}\n\n`;
+
+            if (scoreRows) {
+              body += `### How it scored\n| Score | What I checked |\n|-------|---------------|\n${scoreRows}\n\n`;
+            }
+            if (checksRows) {
+              body += `### Details\n| | Check | What I found |\n|--|-------|-------------|\n${checksRows}\n\n`;
+            }
+            if (issuesList) {
+              body += `### Things to fix\n${issuesList}\n\n`;
+            }
+            const testActions = (review.actions || [])
+              .filter(a => a && a.length > 0)
+              .map((a, i) => `${i + 1}. ${a}`)
+              .join('\n');
+            if (testActions) {
+              body += `### Recommended actions\n${testActions}\n\n`;
+            }
             if (review.notes) {
-              summary += `\n**Notes:** ${review.notes}\n`;
+              body += `### Other thoughts\n${review.notes}\n`;
             }
 
-            // Post detailed review as PR comment (job status provides pass/fail)
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: summary
+              body
             });
 
   # ─── Configuration Review ───────────────────────────────
@@ -658,10 +720,8 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: "## ⏭️ Configuration Review: SKIPPED\n\n" +
-                    "**Reason:** " + skipReason + "\n\n" +
-                    "**Scope:** Configuration review focuses on DevOps and documentation files (.yml, .toml, .md) to analyze CI/CD patterns, documentation quality, and configuration best practices. This PR contains no configuration files to review.\n\n" +
-                    "**Files in this PR:** Source code or test files only."
+              body: "## ⏭️ Configuration Review: Skipped\n\n" +
+                    "No config/docs files (.yml, .toml, .md) in this PR — pure code change."
             });
 
       - name: Checkout repo
@@ -740,7 +800,7 @@ jobs:
               "summary": "No configuration files to review",
               "checks": [{"name": "File Classification", "status": "pass", "detail": "No config files detected"}],
               "issues": [],
-              "notes": "Configuration review focuses on CI/CD, docs, and config files."
+              "notes": "No config files here — nothing to review."
             }' > /tmp/config_review_result.json
             echo "verdict=PASS" >> $GITHUB_OUTPUT
             exit 0
@@ -748,7 +808,7 @@ jobs:
           
           # Create the configuration review prompt — tight, enforces CI/docs standards
           cat > /tmp/config_prompt.txt << 'CONFIG_PROMPT'
-          You review CI/CD, documentation, and config changes for pi-daemon against the existing check catalog (provided below). You catch real problems.
+          You review CI/CD, documentation, and config changes for pi-daemon against the existing check catalog (provided below). Write like a DevOps engineer reviewing a teammate's PR — brief, precise, no corporate speak. If a workflow looks clean, say so in one sentence. If something will break in CI, say exactly what and why.
 
           ## Hard FAIL rules
           - New workflow job not documented in docs/PR-Reviews.md
@@ -773,7 +833,14 @@ jobs:
           FAIL: any dimension scores 0 OR average < 2.0
 
           ## Output format — JSON only, no markdown, no explanation outside the JSON
-          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"yaml_correctness":N,"naming":N,"docs_sync":N,"security":N,"changelog":N,"maintainability":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":[{"severity":"error|warning|info","file":"string","description":"string"}],"notes":"string"}
+          {"verdict":"PASS|FAIL","summary":"one sentence","checklist_verdict":"PASS|FAIL","expert_verdict":"PASS|FAIL","scores":{"yaml_correctness":N,"naming":N,"docs_sync":N,"security":N,"changelog":N,"maintainability":N},"checks":[{"name":"string","status":"pass|fail|warning","detail":"string"}],"issues":[{"severity":"error|warning|info","file":"string","description":"string"}],"actions":["concrete task, e.g. Add new-workflow entry to docs/PR-Reviews.md checks table","Add concurrency group to template-sync.yml to prevent parallel runs"],"notes":"string"}
+
+          ## actions field rules
+          - Each action is a single concrete task the PR author can act on immediately
+          - Start with a verb: Add, Update, Remove, Fix, Document, Move
+          - Reference specific files when possible
+          - If verdict is PASS, actions should be empty or contain only minor suggestions
+          - If verdict is FAIL, actions must list every required fix as a workable checklist
           CONFIG_PROMPT
 
           # Build the user input  
@@ -865,74 +932,61 @@ jobs:
               const raw = fs.readFileSync('/tmp/config_review_result.json', 'utf8');
               review = JSON.parse(raw);
             } catch (e) {
-              review = {
-                verdict: 'PASS',
-                summary: 'Configuration review completed',
-                checklist_verdict: 'PASS',
-                expert_verdict: 'PASS',
-                checks: [],
-                issues: [],
-                notes: 'Configuration file classification successful.'
-              };
+              review = { verdict: 'PASS', summary: 'Parse error — defaulting to PASS', scores: {}, checks: [], issues: [], notes: '' };
             }
 
             const verdict = review.verdict || 'PASS';
-            const conclusion = verdict === 'PASS' ? 'success' : 'failure';
+            const icon = verdict === 'PASS' ? '✅' : '❌';
             const configCount = '${{ needs.classify.outputs.config_count }}';
-            const diffSize = '${{ steps.diff.outputs.config_diff_size || 0 }}';
 
-            // Build enhanced summary with dual-layer results
-            const checksTable = (review.checks || [])
+            // Build scores table
+            const scores = review.scores || {};
+            const scoreRows = Object.entries(scores)
+              .map(([dim, score]) => {
+                const s = Number(score);
+                const si = s === 0 ? '🔴' : s === 1 ? '🟡' : s === 2 ? '✅' : '🟢';
+                return `| ${si} ${s}/3 | ${dim} |`;
+              }).join('\n');
+
+            // Build checks table
+            const checksRows = (review.checks || [])
               .map(c => {
-                const icon = c.status === 'pass' ? '✅' : c.status === 'fail' ? '❌' : '⏭️';
-                return `| ${icon} | ${c.name} | ${c.detail || ''} |`;
-              })
-              .join('\n');
+                const ci = c.status === 'pass' ? '✅' : c.status === 'fail' ? '❌' : '⚠️';
+                return `| ${ci} | ${c.name} | ${c.detail || ''} |`;
+              }).join('\n');
 
-            let summary = `## ${verdict === 'PASS' ? '✅' : '❌'} ⚙️ Configuration Review: ${verdict}\n\n`;
-            summary += `**${review.summary || 'No summary'}**\n\n`;
-            
-            // File classification summary
-            summary += `### 📁 File Classification (Configuration Focus)\n`;
-            summary += `**Config Files:** ${configCount} configuration files\n`;
-            summary += `**Review Size:** ${Math.round(diffSize/1000)}KB focused on DevOps and documentation\n\n`;
-
-            // Dual-layer results
-            const checklistIcon = review.checklist_verdict === 'PASS' ? '✅' : '❌';
-            const expertIcon = review.expert_verdict === 'PASS' ? '✅' : '❌';
-            
-            summary += `### ${checklistIcon} Layer 1: Technical Compliance - ${review.checklist_verdict || 'PASS'}\n\n`;
-            
-            if (checksTable) {
-              summary += `| Status | Check | Detail |\n|--------|-------|--------|\n${checksTable}\n\n`;
-            }
-            
-            summary += `### ${expertIcon} Layer 2: DevOps Expert Analysis - ${review.expert_verdict || 'PASS'}\n\n`;
-            
-            if (review.devops_analysis) {
-              summary += `${review.devops_analysis}\n\n`;
-            }
-
-            // Issues list
+            // Build issues list
             const issuesList = (review.issues || [])
               .map(i => {
-                const icon = i.severity === 'error' ? '🔴' : i.severity === 'warning' ? '🟡' : 'ℹ️';
+                const sev = (i.severity === 'error') ? '🔴' : (i.severity === 'warning') ? '🟡' : 'ℹ️';
                 const file = i.file ? `\`${i.file}\`: ` : '';
-                return `- ${icon} ${file}${i.description}`;
+                return `- ${sev} ${file}${typeof i === 'string' ? i : i.description || ''}`;
               })
+              .filter(i => i.length > 5)
               .join('\n');
 
-            if (issuesList) {
-              summary += `### Issues\n\n${issuesList}\n\n`;
+            let body = `## ${icon} ⚙️ Configuration Review: ${verdict}\n\n`;
+            body += `Checked ${configCount} config/docs file${configCount === '1' ? '' : 's'}. `;
+            body += `${review.summary || 'No issues found.'}\n\n`;
+
+            if (scoreRows) {
+              body += `### How it scored\n| Score | What I checked |\n|-------|---------------|\n${scoreRows}\n\n`;
             }
-
-            // Result explanation
-            summary += `### 🎯 Dual-Layer Result\n`;
-            summary += `**Technical Compliance:** ${review.checklist_verdict || 'PASS'} | **DevOps Analysis:** ${review.expert_verdict || 'PASS'}\n`;
-            summary += `**Final Verdict:** ${verdict} (both layers must pass)\n\n`;
-
+            if (checksRows) {
+              body += `### Details\n| | Check | What I found |\n|--|-------|-------------|\n${checksRows}\n\n`;
+            }
+            if (issuesList) {
+              body += `### Things to fix\n${issuesList}\n\n`;
+            }
+            const cfgActions = (review.actions || [])
+              .filter(a => a && typeof a === 'string' && a.length > 0)
+              .map((a, i) => `${i + 1}. ${a}`)
+              .join('\n');
+            if (cfgActions) {
+              body += `### Recommended actions\n${cfgActions}\n\n`;
+            }
             if (review.notes) {
-              summary += `### 📝 Notes\n\n${review.notes}\n\n`;
+              body += `### Other thoughts\n${review.notes}\n`;
             }
 
             // Post detailed review as PR comment (job status provides pass/fail)
@@ -940,7 +994,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.issue.number,
-              body: summary
+              body
             });
 
   # ─── Code Review Gate ───────────────────────────────────
