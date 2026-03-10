@@ -140,7 +140,7 @@ async fn test_foreground_vs_background_behavior() {
     // Test the basic command line parsing difference between foreground and background modes
     // In CI environments, spawning processes can have permission issues, so we'll test
     // the argument parsing and help text instead of actual process spawning
-    
+
     Command::cargo_bin("pi-daemon")
         .unwrap()
         .args(["start", "--help"])
@@ -149,14 +149,14 @@ async fn test_foreground_vs_background_behavior() {
         .stdout(predicate::str::contains("--foreground"))
         .stdout(predicate::str::contains("Run in foreground"));
 
-    // Test that the foreground flag is recognized 
+    // Test that the foreground flag is recognized
     // (This will fail because daemon isn't configured, but should show correct argument parsing)
     let _result = Command::cargo_bin("pi-daemon")
         .unwrap()
         .args(["start", "--foreground", "--listen", "127.0.0.1:0"])
         .timeout(Duration::from_secs(3))
         .output();
-        
+
     // In CI, this might fail due to permissions or missing config, but that's OK
     // The important thing is that the arguments are parsed correctly
     match _result {
