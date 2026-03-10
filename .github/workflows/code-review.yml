@@ -114,19 +114,51 @@ jobs:
     name: Architectural Review
     runs-on: ubuntu-latest
     needs: [classify]
-    if: needs.classify.outputs.need_arch_review == 'true'
+    # Always run - handle skipping internally with explanatory comments
     steps:
+      - name: Determine review action
+        id: action
+        run: |
+          if [ "${{ needs.classify.outputs.need_arch_review }}" = "true" ]; then
+            echo "action=review" >> $GITHUB_OUTPUT
+            echo "source_count=${{ needs.classify.outputs.source_count }}" >> $GITHUB_OUTPUT
+          else
+            echo "action=skip" >> $GITHUB_OUTPUT
+            echo "skip_reason=No source files (.rs, .ts, .js) detected for architectural review" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create skip comment and check
+        if: steps.action.outputs.action == 'skip'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const skipReason = '${{ steps.action.outputs.skip_reason }}';
+            
+            // Create explanatory skip comment (no GitHub check needed - job status shows skip)
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "## ⏭️ Architectural Review: SKIPPED\n\n" +
+                    "**Reason:** " + skipReason + "\n\n" +
+                    "**Scope:** Architectural review focuses on source code files (.rs, .ts, .js) containing architectural decisions, design patterns, and code structure. This PR contains no source files to review architecturally.\n\n" +
+                    "**Files in this PR:** Configuration files, documentation, or generated files only."
+            });
+
       - name: Checkout repo
+        if: steps.action.outputs.action == 'review'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Download file classification
+        if: steps.action.outputs.action == 'review'
         uses: actions/download-artifact@v4
         with:
           name: file-classification
 
       - name: Run architectural review
+        if: steps.action.outputs.action == 'review'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -159,6 +191,7 @@ jobs:
           echo "Architectural review completed"
 
       - name: Fail job if review failed  
+        if: steps.action.outputs.action == 'review'
         run: |
           # Read the verdict and fail job if review failed
           VERDICT=$(cat /tmp/arch_review_result.json | jq -r '.verdict // "PASS"')
@@ -169,6 +202,7 @@ jobs:
           echo "Architectural review passed: $VERDICT"
 
       - name: Create Architectural Check
+        if: steps.action.outputs.action == 'review'
         uses: actions/github-script@v7
         with:
           script: |
@@ -217,19 +251,51 @@ jobs:
     name: Test Quality Review
     runs-on: ubuntu-latest
     needs: [classify]
-    if: needs.classify.outputs.need_test_review == 'true'
+    # Always run - handle skipping internally with explanatory comments
     steps:
+      - name: Determine review action
+        id: action
+        run: |
+          if [ "${{ needs.classify.outputs.need_test_review }}" = "true" ]; then
+            echo "action=review" >> $GITHUB_OUTPUT
+            echo "test_count=${{ needs.classify.outputs.test_count }}" >> $GITHUB_OUTPUT
+          else
+            echo "action=skip" >> $GITHUB_OUTPUT
+            echo "skip_reason=No test files detected for test quality review" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create skip comment and check
+        if: steps.action.outputs.action == 'skip'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const skipReason = '${{ steps.action.outputs.skip_reason }}';
+            
+            // Create explanatory skip comment (no GitHub check needed - job status shows skip)
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "## ⏭️ Test Quality Review: SKIPPED\n\n" +
+                    "**Reason:** " + skipReason + "\n\n" +
+                    "**Scope:** Test quality review focuses on test files (test*.rs, *_test.go, *.test.ts, spec/) to analyze testing patterns, coverage quality, and test maintainability. This PR contains no test file changes to review.\n\n" +
+                    "**Files in this PR:** Source code, configuration, or documentation files only."
+            });
+
       - name: Checkout repo
+        if: steps.action.outputs.action == 'review'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Download file classification
+        if: steps.action.outputs.action == 'review'
         uses: actions/download-artifact@v4
         with:
           name: file-classification
 
       - name: Run test quality review
+        if: steps.action.outputs.action == 'review'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -262,6 +328,7 @@ jobs:
           echo "Test quality review completed"
 
       - name: Fail job if review failed
+        if: steps.action.outputs.action == 'review'
         run: |
           # Read the verdict and fail job if review failed  
           VERDICT=$(cat /tmp/test_review_result.json | jq -r '.verdict // "PASS"')
@@ -272,6 +339,7 @@ jobs:
           echo "Test quality review passed: $VERDICT"
 
       - name: Create Test Quality Check
+        if: steps.action.outputs.action == 'review'
         uses: actions/github-script@v7
         with:
           script: |
@@ -320,19 +388,51 @@ jobs:
     name: Configuration Review
     runs-on: ubuntu-latest
     needs: [classify]
-    if: needs.classify.outputs.need_config_review == 'true'
+    # Always run - handle skipping internally with explanatory comments
     steps:
+      - name: Determine review action
+        id: action
+        run: |
+          if [ "${{ needs.classify.outputs.need_config_review }}" = "true" ]; then
+            echo "action=review" >> $GITHUB_OUTPUT
+            echo "config_count=${{ needs.classify.outputs.config_count }}" >> $GITHUB_OUTPUT
+          else
+            echo "action=skip" >> $GITHUB_OUTPUT
+            echo "skip_reason=No configuration files detected for configuration review" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create skip comment and check
+        if: steps.action.outputs.action == 'skip'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const skipReason = '${{ steps.action.outputs.skip_reason }}';
+            
+            // Create explanatory skip comment (no GitHub check needed - job status shows skip)
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: "## ⏭️ Configuration Review: SKIPPED\n\n" +
+                    "**Reason:** " + skipReason + "\n\n" +
+                    "**Scope:** Configuration review focuses on DevOps and documentation files (.yml, .toml, .md) to analyze CI/CD patterns, documentation quality, and configuration best practices. This PR contains no configuration files to review.\n\n" +
+                    "**Files in this PR:** Source code or test files only."
+            });
+
       - name: Checkout repo
+        if: steps.action.outputs.action == 'review'
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       - name: Download file classification
+        if: steps.action.outputs.action == 'review'
         uses: actions/download-artifact@v4
         with:
           name: file-classification
 
       - name: Generate filtered diff for configuration review
+        if: steps.action.outputs.action == 'review'
         run: |
           echo "Generating filtered diff for configuration review..."
           
@@ -359,6 +459,7 @@ jobs:
           echo "config_diff_size=$DIFF_SIZE" >> $GITHUB_OUTPUT
 
       - name: Gather configuration context
+        if: steps.action.outputs.action == 'review'
         run: |
           # Gather configuration and DevOps context
           echo "=== Existing CI/CD Patterns ===" > /tmp/config_context.txt
@@ -376,6 +477,7 @@ jobs:
           echo "config_context_size=$(wc -c < /tmp/config_context.txt)" >> $GITHUB_OUTPUT
 
       - name: Run dual-layer configuration review
+        if: steps.action.outputs.action == 'review'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -478,6 +580,7 @@ jobs:
           echo "Configuration review complete: $FINAL_VERDICT (Checklist: $CHECKLIST_VERDICT, Expert: $EXPERT_VERDICT)"
 
       - name: Fail job if review failed
+        if: steps.action.outputs.action == 'review'
         run: |
           # Read the verdict and fail job if review failed
           VERDICT=$(cat /tmp/config_review_result.json | jq -r '.verdict // "PASS"')
@@ -488,6 +591,7 @@ jobs:
           echo "Configuration review passed: $VERDICT"
 
       - name: Create Configuration Check
+        if: steps.action.outputs.action == 'review'
         uses: actions/github-script@v7
         with:
           script: |

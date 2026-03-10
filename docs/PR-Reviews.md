@@ -219,6 +219,7 @@ Comprehensive code review system with intelligent file classification and specia
 - **❌ Auto-Exclude:** Generated files (package-lock.json, node_modules/, dist/) to prevent token overflow
 - **🚀 Performance:** 75-97% faster execution through focused, conditional review execution
 - **🎯 Single Check per Review:** Job status shows pass/fail, detailed analysis in PR comments (no duplicate checks)
+- **💬 Always Comment:** Every review type comments — detailed analysis when files present, clear skip explanation when no relevant files
 
 **🎯 Clean Single-Check Architecture:**
 
