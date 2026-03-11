@@ -69,6 +69,28 @@
 
 <!-- e.g., "New integration test using FullTestServer that verifies..." -->
 
+## Agent Experience
+
+<!-- What does an AI agent (CI bot, pi-daemon-app, coding agent) see when
+     interacting with this feature? Include example log output, CLI output,
+     or workflow summaries the agent would produce or consume. -->
+
+### What the Agent Sees
+
+```
+<!-- Example: CI log output, API response, queue progress, etc. -->
+```
+
+## Human Experience
+
+<!-- What does a human (PR author, reviewer, end user) see? Describe the
+     visible surface — PR comments, UI changes, dashboard entries, CLI output.
+     Include mockups or example output where helpful. -->
+
+### What the User Sees
+
+<!-- Example: PR review comment, webchat UI change, terminal output, etc. -->
+
 ## Impact on Existing Systems
 
 <!-- What existing components are affected? Use this table format: -->
