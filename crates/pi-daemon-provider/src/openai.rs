@@ -316,4 +316,101 @@ mod tests {
         assert_eq!(msgs[0]["role"], "system");
         assert_eq!(msgs[0]["content"], "You are helpful.");
     }
+
+    /// Helper: start an axum server that always returns the given status and body.
+    async fn start_mock_server(status: axum::http::StatusCode, body: &'static str) -> String {
+        use axum::{routing::post, Router};
+
+        let app = Router::new().route(
+            "/v1/chat/completions",
+            post(move || async move { (status, body.to_string()) }),
+        );
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("http://{addr}")
+    }
+
+    #[tokio::test]
+    async fn test_send_with_retry_non_retryable_api_error() {
+        let base = start_mock_server(
+            axum::http::StatusCode::BAD_REQUEST,
+            r#"{"error":{"message":"invalid model"}}"#,
+        )
+        .await;
+
+        let provider = OpenAIProvider::new("test-key".into(), Some(base)).unwrap();
+        let body = serde_json::json!({"model": "bad-model", "stream": true});
+
+        let err = provider.send_with_retry(&body).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("400"), "expected 400 in: {msg}");
+        assert!(msg.contains("invalid model"), "expected body in: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_send_with_retry_unauthorized_error() {
+        let base = start_mock_server(
+            axum::http::StatusCode::UNAUTHORIZED,
+            r#"{"error":{"message":"invalid api key"}}"#,
+        )
+        .await;
+
+        let provider = OpenAIProvider::new("bad-key".into(), Some(base)).unwrap();
+        let body = serde_json::json!({"model": "gpt-4o", "stream": true});
+
+        let err = provider.send_with_retry(&body).await.unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            matches!(err, DaemonError::Api(_)),
+            "expected DaemonError::Api, got: {err:?}"
+        );
+        assert!(msg.contains("401"), "expected 401 in: {msg}");
+    }
+
+    #[tokio::test]
+    async fn test_send_with_retry_forbidden_error() {
+        let base = start_mock_server(axum::http::StatusCode::FORBIDDEN, "Forbidden").await;
+
+        let provider = OpenAIProvider::new("key".into(), Some(base)).unwrap();
+        let body = serde_json::json!({"model": "gpt-4o", "stream": true});
+
+        let err = provider.send_with_retry(&body).await.unwrap_err();
+        assert!(matches!(err, DaemonError::Api(_)));
+        assert!(err.to_string().contains("403"));
+    }
+
+    #[tokio::test]
+    async fn test_send_with_retry_success_returns_ok() {
+        let base = start_mock_server(axum::http::StatusCode::OK, "{}").await;
+
+        let provider = OpenAIProvider::new("key".into(), Some(base)).unwrap();
+        let body = serde_json::json!({"model": "gpt-4o", "stream": true});
+
+        let resp = provider.send_with_retry(&body).await;
+        assert!(resp.is_ok(), "expected Ok, got: {resp:?}");
+    }
+
+    #[tokio::test]
+    async fn test_send_with_retry_connection_refused() {
+        // Point at a port with nothing listening
+        let provider =
+            OpenAIProvider::new("key".into(), Some("http://127.0.0.1:1".into())).unwrap();
+        let body = serde_json::json!({"model": "m", "stream": true});
+
+        let err = provider.send_with_retry(&body).await.unwrap_err();
+        assert!(
+            matches!(err, DaemonError::Api(_)),
+            "expected DaemonError::Api, got: {err:?}"
+        );
+        assert!(
+            err.to_string().contains("request failed"),
+            "expected connection error in: {}",
+            err
+        );
+    }
 }
