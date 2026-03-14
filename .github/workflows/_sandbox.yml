@@ -35,6 +35,7 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_BACKTRACE: 1
+      OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
     steps:
       - uses: actions/checkout@v4
       
@@ -182,40 +183,144 @@ jobs:
 
       - name: "Smoke: OpenAI-compatible endpoint"
         run: |
-          echo "Testing OpenAI-compatible endpoint..."
+          echo "Testing OpenAI-compatible endpoint with layered verification..."
           
-          # Non-streaming request
-          RESP=$(curl -sf -X POST http://127.0.0.1:4200/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -d '{"model":"sandbox-test","messages":[{"role":"user","content":"hello world"}],"stream":false}')
-          echo "OpenAI response: $RESP"
-          
-          # Validate response structure  
-          COMPLETION_ID=$(echo "$RESP" | jq -r '.id' 2>/dev/null || echo "")
-          [ -n "$COMPLETION_ID" ] || { echo "❌ Missing completion ID"; exit 1; }
-          
-          OBJECT_TYPE=$(echo "$RESP" | jq -r '.object' 2>/dev/null || echo "")
-          [ "$OBJECT_TYPE" = "chat.completion" ] || { echo "❌ Wrong object type: $OBJECT_TYPE"; exit 1; }
-          
-          CONTENT=$(echo "$RESP" | jq -r '.choices[0].message.content' 2>/dev/null || echo "")
-          [ -n "$CONTENT" ] || { echo "❌ Missing response content"; exit 1; }
-          
-          TOTAL_TOKENS=$(echo "$RESP" | jq -r '.usage.total_tokens' 2>/dev/null || echo "0")
-          [ "$TOTAL_TOKENS" -gt 0 ] || { echo "❌ Missing or zero usage tokens"; exit 1; }
-          
-          # Streaming request
-          echo "Testing streaming mode..."
-          STREAM_RESP=$(curl -sf -X POST http://127.0.0.1:4200/v1/chat/completions \
-            -H "Content-Type: application/json" \
-            -d '{"model":"sandbox-test","messages":[{"role":"user","content":"test"}],"stream":true}')
-          
-          if ! echo "$STREAM_RESP" | grep -q "data: {"; then
-            echo "❌ Streaming format invalid"; exit 1; 
+          # ─── Step 1: Network sanity — runner → google.com ─────────────────
+          echo "Step 1: Network sanity check..."
+          if ! curl -sf --max-time 10 https://www.google.com >/dev/null 2>&1; then
+            echo "❌ FAIL: Container network is broken."
+            echo "This is an infrastructure issue, not a code issue."
+            exit 1
           fi
-          if ! echo "$STREAM_RESP" | grep -q "data: \[DONE\]"; then
-            echo "❌ Missing [DONE] terminator"; exit 1; 
+          echo "✅ Step 1 passed: Network is functional"
+          
+          # ─── Step 2: Provider health check — runner → OpenRouter ──────────
+          echo "Step 2: Provider health check (OpenRouter)..."
+          PROVIDER_HEALTH=""
+          for attempt in 1 2 3; do
+            echo "  Attempt $attempt/3..."
+            if curl -sf --max-time 15 https://openrouter.ai/api/v1/models \
+              -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+              -H "Content-Type: application/json" >/dev/null 2>&1; then
+              PROVIDER_HEALTH="ok"
+              break
+            fi
+            echo "  OpenRouter not responding, waiting 10s before retry..."
+            sleep 10
+          done
+          
+          if [ "$PROVIDER_HEALTH" != "ok" ]; then
+            echo "❌ FAIL: OpenRouter is unreachable — retry CI later."
+            echo "The provider API appears to be down. This is not a code issue."
+            echo "Wait and retry the CI job in an hour."
+            exit 1
           fi
-          echo "✅ OpenAI-compatible endpoint passed"
+          echo "✅ Step 2 passed: OpenRouter is reachable"
+          
+          # ─── Step 3: Daemon endpoints — runner → daemon ───────────────────
+          echo "Step 3: Daemon endpoint verification..."
+          DAEMON_HEALTH=$(curl -sf --max-time 5 http://127.0.0.1:4200/api/health)
+          if ! echo "$DAEMON_HEALTH" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+            echo "❌ FAIL: Daemon health check failed"
+            echo "Response: $DAEMON_HEALTH"
+            echo "Steps 1-2 passed, so this is a daemon issue. Check the API code."
+            exit 1
+          fi
+          
+          # Verify /v1/models endpoint exists and returns proper structure
+          MODELS_RESP=$(curl -sf --max-time 5 http://127.0.0.1:4200/v1/models 2>&1) || {
+            echo "❌ FAIL: Daemon /v1/models endpoint failed"
+            echo "Response: $MODELS_RESP"
+            exit 1
+          }
+          if ! echo "$MODELS_RESP" | jq -e '.data | length >= 0' >/dev/null 2>&1; then
+            echo "❌ FAIL: /v1/models response malformed"
+            echo "Response: $MODELS_RESP"
+            exit 1
+          fi
+          echo "✅ Step 3 passed: Daemon endpoints responding correctly"
+          
+          # ─── Step 4: End-to-end — client → daemon → OpenRouter ───────────
+          echo "Step 4: End-to-end completion test..."
+          
+          # Free model from OpenRouter (gemma-2-9b-it:free)
+          TEST_MODEL="google/gemma-2-9b-it:free"
+          echo "  Using model: $TEST_MODEL"
+          
+          # Test non-streaming with retry
+          E2E_SUCCESS=""
+          for attempt in 1 2 3; do
+            echo "  Non-streaming attempt $attempt/3..."
+            RESP=$(curl -sf -X POST http://127.0.0.1:4200/v1/chat/completions \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+              -d "{\"model\":\"${TEST_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Say hello in one word\"}],\"stream\":false}" 2>&1)
+            
+            if [ $? -eq 0 ] && [ -n "$RESP" ]; then
+              # Validate response structure
+              COMPLETION_ID=$(echo "$RESP" | jq -r '.id' 2>/dev/null || echo "")
+              OBJECT_TYPE=$(echo "$RESP" | jq -r '.object' 2>/dev/null || echo "")
+              CONTENT=$(echo "$RESP" | jq -r '.choices[0].message.content' 2>/dev/null || echo "")
+              TOTAL_TOKENS=$(echo "$RESP" | jq -r '.usage.total_tokens // 0' 2>/dev/null || echo "0")
+              
+              if [ -n "$COMPLETION_ID" ] && [ "$OBJECT_TYPE" = "chat.completion" ] && \
+                 [ -n "$CONTENT" ] && [ "$TOTAL_TOKENS" -gt 0 ]; then
+                echo "    Response: $CONTENT"
+                E2E_SUCCESS="ok"
+                break
+              else
+                echo "    Response structure invalid, retrying..."
+                echo "    Response: $RESP"
+              fi
+            else
+              echo "    Request failed, retrying..."
+              echo "    Response: $RESP"
+            fi
+            sleep 5
+          done
+          
+          if [ "$E2E_SUCCESS" != "ok" ]; then
+            echo "❌ FAIL: End-to-end completion failed after 3 retries"
+            echo "Steps 1-3 passed, so this indicates a provider integration, routing, or response formatting issue."
+            exit 1
+          fi
+          echo "✅ Non-streaming test passed"
+          
+          # Test streaming with retry
+          echo "  Testing streaming mode..."
+          STREAM_SUCCESS=""
+          for attempt in 1 2 3; do
+            echo "  Streaming attempt $attempt/3..."
+            STREAM_RESP=$(curl -sf -X POST http://127.0.0.1:4200/v1/chat/completions \
+              -H "Content-Type: application/json" \
+              -H "Authorization: Bearer ${OPENROUTER_API_KEY}" \
+              -d "{\"model\":\"${TEST_MODEL}\",\"messages\":[{\"role\":\"user\",\"content\":\"Hi\"}],\"stream\":true}" 2>&1)
+            
+            if [ $? -eq 0 ] && [ -n "$STREAM_RESP" ]; then
+              # Validate SSE format
+              HAS_DATA=$(echo "$STREAM_RESP" | grep -c "data: {" || echo "0")
+              HAS_DONE=$(echo "$STREAM_RESP" | grep -c "data: \[DONE\]" || echo "0")
+              
+              if [ "$HAS_DATA" -gt 0 ] && [ "$HAS_DONE" -gt 0 ]; then
+                STREAM_SUCCESS="ok"
+                break
+              else
+                echo "    Streaming format invalid (data chunks: $HAS_DATA, DONE: $HAS_DONE)"
+              fi
+            else
+              echo "    Streaming request failed"
+            fi
+            sleep 5
+          done
+          
+          if [ "$STREAM_SUCCESS" != "ok" ]; then
+            echo "❌ FAIL: Streaming test failed after 3 retries"
+            echo "Steps 1-4 (non-streaming) passed, so this indicates a streaming-specific issue."
+            exit 1
+          fi
+          echo "✅ Streaming test passed"
+          
+          echo "✅ All OpenAI-compatible endpoint tests passed"
 
       - name: "Smoke: PID file management"
         run: |
