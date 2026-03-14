@@ -290,12 +290,23 @@ async fn test_openrouter_streaming() {
         .unwrap();
 
     let mut text = String::new();
+    let mut got_done = false;
+
     while let Some(event) = stream.next().await {
-        if let StreamEvent::TextDelta(t) = event {
-            text.push_str(&t);
+        match event {
+            StreamEvent::TextDelta(t) => text.push_str(&t),
+            StreamEvent::Done(usage) => {
+                assert_eq!(usage.input_tokens, 10);
+                assert_eq!(usage.output_tokens, 5);
+                got_done = true;
+            }
+            StreamEvent::Error(e) => panic!("Unexpected error: {e}"),
+            _ => {}
         }
     }
+
     assert_eq!(text, "Hello there!");
+    assert!(got_done, "Should have received Done event");
 }
 
 // ---------------------------------------------------------------------------
@@ -421,11 +432,12 @@ async fn test_anthropic_retry_on_429() {
 fn test_router_routes_claude_to_anthropic() {
     let config = ProvidersConfig {
         anthropic_api_key: "sk-ant-test".to_string(),
-        openai_api_key: "sk-openai-test".to_string(),
         ..Default::default()
     };
     let router = ProviderRouter::from_config(&config).unwrap();
     assert!(router.route("claude-sonnet-4-20250514").is_ok());
+    // Only Anthropic key configured — OpenAI models should fail
+    assert!(router.route("gpt-4o").is_err());
 }
 
 #[test]
@@ -437,6 +449,8 @@ fn test_router_routes_gpt_to_openai() {
     let router = ProviderRouter::from_config(&config).unwrap();
     assert!(router.route("gpt-4o").is_ok());
     assert!(router.route("o3-mini").is_ok());
+    // Only OpenAI key configured — Anthropic models should fail
+    assert!(router.route("claude-sonnet-4-20250514").is_err());
 }
 
 #[test]
